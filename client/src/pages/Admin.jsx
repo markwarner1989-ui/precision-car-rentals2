@@ -171,6 +171,13 @@ function BookingModal({ booking: b, token, onClose, onChanged }) {
           <>
             {b.assigned_car && <p><strong>Assigned:</strong> {b.assigned_car.desc} · VIN {b.assigned_car.vin} · {b.assigned_car.plate}</p>}
             {b.admin_notes && <p><strong>Notes:</strong> {b.admin_notes}</p>}
+            {b.sign_path && (
+              <div className="note note-info">
+                {b.agreement_status === 'signed' ? 'Signed. ' : 'Awaiting signature. '}
+                Customer sign link:<br />
+                <a href={b.sign_path} target="_blank" rel="noreferrer">{window.location.origin}{b.sign_path}</a>
+              </div>
+            )}
             <button className="btn btn-ghost btn-block" onClick={onClose}>Close</button>
           </>
         )}
