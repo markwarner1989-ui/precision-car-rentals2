@@ -258,6 +258,8 @@ function CarsManager({ token }) {
   const [cars, setCars] = useState([]);
   const [cats, setCats] = useState([]);
   const [f, setF] = useState({ categoryId: '', year: '', make: '', model: '', color: '', vin: '', licensePlate: '' });
+  const [newPhoto, setNewPhoto] = useState(null);
+  const [adding, setAdding] = useState(false);
   const load = () => {
     api.adminGet('/cars', token).then((d) => setCars(d.cars)).catch(() => {});
     api.adminGet('/categories', token).then((d) => setCats(d.categories)).catch(() => {});
@@ -265,9 +267,17 @@ function CarsManager({ token }) {
   useEffect(() => { load(); }, []);
   async function add() {
     if (!f.categoryId || !f.make) return;
-    await api.adminPost('/cars', token, f);
-    setF({ categoryId: '', year: '', make: '', model: '', color: '', vin: '', licensePlate: '' });
-    load();
+    setAdding(true);
+    try {
+      const res = await api.adminPost('/cars', token, f);
+      if (newPhoto && res.id) {
+        const fd = new FormData(); fd.append('photo', newPhoto);
+        try { await api.adminUpload(`/cars/${res.id}/photo`, token, fd); } catch (e) { /* car still created */ }
+      }
+      setF({ categoryId: '', year: '', make: '', model: '', color: '', vin: '', licensePlate: '' });
+      setNewPhoto(null);
+      load();
+    } catch (e) { alert(e.message); } finally { setAdding(false); }
   }
   async function remove(id) { if (confirm('Remove this car?')) { await api.adminDelete(`/cars/${id}`, token); load(); } }
   async function uploadPhoto(id, file) {
@@ -325,7 +335,14 @@ function CarsManager({ token }) {
         </div>
         <div className="field"><label>VIN</label><input className="input" value={f.vin} onChange={(e) => setF({ ...f, vin: e.target.value })} /></div>
         <div className="field"><label>License plate</label><input className="input" value={f.licensePlate} onChange={(e) => setF({ ...f, licensePlate: e.target.value })} /></div>
-        <button className="btn btn-teal btn-block" onClick={add}>Add vehicle</button>
+        <div className="field">
+          <label>Car photo <span className="hint">(appears on the rental agreement)</span></label>
+          <label className={`uploader ${newPhoto ? 'filled' : ''}`} style={{ display: 'block' }}>
+            <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => setNewPhoto(e.target.files[0] || null)} />
+            {newPhoto ? <span className="file-tag">✓ {newPhoto.name}</span> : <><strong>Upload a photo of this car</strong><small>JPG or PNG — optional</small></>}
+          </label>
+        </div>
+        <button className="btn btn-teal btn-block" disabled={adding} onClick={add}>{adding ? 'Adding…' : 'Add vehicle'}</button>
       </div>
     </div>
   );
