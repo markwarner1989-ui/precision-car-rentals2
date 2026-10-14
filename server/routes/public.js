@@ -24,10 +24,18 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => cb(null, `${Date.now()}-${nanoid(6)}-${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`),
 });
 const upload = multer({
-  storage, limits: { fileSize: 8 * 1024 * 1024 },
+  storage, limits: { fileSize: 15 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const ok = /image\/(jpe?g|png|webp|heic)|application\/pdf/.test(file.mimetype);
-    cb(ok ? null : new Error('Only images or PDF allowed'), ok);
+    // Accept any image type, PDF, or files whose extension looks like an image/PDF
+    // (some browsers send a blank or odd mimetype). Reject by SKIPPING the file,
+    // never by throwing — a throw turns the whole booking into a 500.
+    const mt = (file.mimetype || '').toLowerCase();
+    const name = (file.originalname || '').toLowerCase();
+    const ok = mt.startsWith('image/')
+      || mt === 'application/pdf'
+      || mt === 'application/octet-stream'
+      || /\.(jpe?g|png|webp|heic|heif|gif|bmp|tiff?|pdf)$/.test(name);
+    cb(null, ok); // true = keep, false = skip; never pass an Error
   },
 });
 
