@@ -1,6 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { nanoid } from 'nanoid';
 import db from '../lib/db.js';
@@ -12,8 +13,10 @@ import { sendEmail } from '../lib/email.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const router = express.Router();
 
+const uploadsDir = path.join(__dirname, '..', 'uploads');
+fs.mkdirSync(uploadsDir, { recursive: true });
 const storage = multer.diskStorage({
-  destination: path.join(__dirname, '..', 'uploads'),
+  destination: uploadsDir,
   filename: (req, file, cb) => cb(null, `${Date.now()}-${nanoid(6)}-${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`),
 });
 const upload = multer({
