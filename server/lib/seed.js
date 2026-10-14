@@ -1,0 +1,67 @@
+import db from './db.js';
+import { nanoid } from 'nanoid';
+
+db.prepare('DELETE FROM categories').run();
+db.prepare('DELETE FROM cars').run();
+db.prepare('DELETE FROM insurance_options').run();
+
+// ── Categories (with FIXED deposits) ──
+const categories = [
+  { name: 'Economical', example: 'Nissan Versa, Kia Rio or similar', description: 'Fuel-efficient and budget-friendly.', image_url: '/images/economical.svg', daily_rate: 39, deposit: 150, sort_order: 1 },
+  { name: 'Sedan', example: 'Toyota Camry, Honda Accord or similar', description: 'Comfortable mid-size sedans.', image_url: '/images/sedan.svg', daily_rate: 55, deposit: 200, sort_order: 2 },
+  { name: 'SUV', example: 'Chevrolet Tahoe or similar', description: 'Full-size SUVs with room for everyone.', image_url: '/images/suv.svg', daily_rate: 89, deposit: 300, sort_order: 3 },
+  { name: 'Performance', example: 'Dodge Charger, Challenger or similar', description: 'Bold styling and power.', image_url: '/images/performance.svg', daily_rate: 99, deposit: 400, sort_order: 4 },
+  { name: 'Luxury', example: 'BMW 5 Series, Mercedes E-Class or similar', description: 'Premium comfort and refinement.', image_url: '/images/luxury.svg', daily_rate: 129, deposit: 500, sort_order: 5 },
+];
+const catIns = db.prepare(`INSERT INTO categories (id,name,example,description,image_url,daily_rate,deposit,sort_order,active) VALUES (@id,@name,@example,@description,@image_url,@daily_rate,@deposit,@sort_order,1)`);
+const catIds = {};
+for (const c of categories) { const id = nanoid(10); catIds[c.name] = id; catIns.run({ id, ...c }); }
+
+// ── Cars (each with VIN + plate; a category can even be a single specific car) ──
+const cars = [
+  { cat: 'Economical', year: '2021', make: 'Nissan', model: 'Versa', color: 'Silver', vin: '3N1CN8EV5ML000111', plate: 'PCR-1001' },
+  { cat: 'Economical', year: '2020', make: 'Kia', model: 'Rio', color: 'White', vin: '3KPA24AD6LE000222', plate: 'PCR-1002' },
+  { cat: 'Sedan', year: '2022', make: 'Toyota', model: 'Camry', color: 'Gray', vin: '4T1C11AK4NU000333', plate: 'PCR-2001' },
+  { cat: 'Sedan', year: '2021', make: 'Honda', model: 'Accord', color: 'Black', vin: '1HGCV1F1XMA000444', plate: 'PCR-2002' },
+  { cat: 'SUV', year: '2023', make: 'Chevrolet', model: 'Tahoe', color: 'Black', vin: '1GNSKPKD2PR000555', plate: 'PCR-3001' },
+  { cat: 'SUV', year: '2022', make: 'Ford', model: 'Explorer', color: 'Blue', vin: '1FMSK8DH5NG000666', plate: 'PCR-3002' },
+  { cat: 'Performance', year: '2022', make: 'Dodge', model: 'Charger', color: 'Red', vin: '2C3CDXBG7NH000777', plate: 'PCR-4001' },
+  { cat: 'Performance', year: '2021', make: 'Dodge', model: 'Challenger', color: 'Orange', vin: '2C3CDZAG9MH000888', plate: 'PCR-4002' },
+  { cat: 'Luxury', year: '2023', make: 'BMW', model: '540i', color: 'White', vin: 'WBA53BJ00PW000999', plate: 'PCR-5001' },
+];
+const carIns = db.prepare(`INSERT INTO cars (id,category_id,year,make,model,color,vin,license_plate,image_url,status,active) VALUES (@id,@category_id,@year,@make,@model,@color,@vin,@license_plate,@image_url,'available',1)`);
+for (const c of cars) {
+  carIns.run({ id: nanoid(10), category_id: catIds[c.cat], year: c.year, make: c.make, model: c.model, color: c.color, vin: c.vin, license_plate: c.plate, image_url: null });
+}
+
+// ── Insurance options ──
+// Flow: first "Do you have your own insurance?" (Yes/No).
+//  - Yes  → "What kind?" → Full Coverage or Liability (own policy, must be in their name).
+//  - No   → our insurance package ($45/day, added to the deposit / due now).
+const insurance = [
+  {
+    code: 'full', label: 'Full Coverage', has_own: 1,
+    surcharge_daily: 0, surcharge_target: 'pickup',
+    requires_docs: JSON.stringify(['license', 'insurance_card', 'declaration_page']),
+    followup_text: 'Great — since your policy already carries full coverage in your name, you don\u2019t need to purchase anything extra from us. Please upload your license, insurance card, and your policy declaration page.',
+    allowed: 1, sort_order: 1,
+  },
+  {
+    code: 'liability', label: 'Liability Only', has_own: 1,
+    surcharge_daily: 25, surcharge_target: 'pickup',
+    requires_docs: JSON.stringify(['license', 'insurance_card']),
+    followup_text: 'Since your policy is liability-only, you\u2019ll need to purchase collision coverage from us for $25/day, added to your pickup balance. Please upload your license and insurance card.',
+    allowed: 1, sort_order: 2,
+  },
+  {
+    code: 'our_package', label: 'Precision insurance package', has_own: 0,
+    surcharge_daily: 45, surcharge_target: 'deposit',
+    requires_docs: JSON.stringify(['license', 'payment_card']),
+    followup_text: 'No problem — our insurance package fully covers you for $45/day, added to your deposit. Please upload your license and a photo of the payment card you\u2019ll use.',
+    allowed: 1, sort_order: 3,
+  },
+];
+const insIns = db.prepare(`INSERT INTO insurance_options (id,code,label,has_own,surcharge_daily,surcharge_target,requires_docs,followup_text,allowed,sort_order) VALUES (@id,@code,@label,@has_own,@surcharge_daily,@surcharge_target,@requires_docs,@followup_text,@allowed,@sort_order)`);
+for (const i of insurance) insIns.run({ id: nanoid(10), ...i });
+
+console.log(`Seeded ${categories.length} categories, ${cars.length} cars, ${insurance.length} insurance options.`);
