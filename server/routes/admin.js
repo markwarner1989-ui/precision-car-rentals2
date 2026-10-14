@@ -1,9 +1,24 @@
 import express from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import { nanoid } from 'nanoid';
 import db from '../lib/db.js';
 import { signAdmin, requireAdmin } from '../lib/auth.js';
 import { availableCarsInCategory } from '../lib/pricing.js';
 import { sendEmail } from '../lib/email.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const uploadsDir = path.join(__dirname, '..', 'uploads');
+const carPhoto = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => { try { fs.mkdirSync(uploadsDir, { recursive: true }); cb(null, uploadsDir); } catch (e) { cb(e); } },
+    filename: (req, file, cb) => cb(null, `car-${Date.now()}-${nanoid(6)}-${(file.originalname || 'photo').replace(/[^a-zA-Z0-9._-]/g, '_')}`),
+  }),
+  limits: { fileSize: 15 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, (file.mimetype || '').startsWith('image/') || /\.(jpe?g|png|webp|heic|heif|gif|bmp|tiff?)$/i.test(file.originalname || '')),
+});
 
 const router = express.Router();
 
@@ -121,6 +136,14 @@ router.put('/cars/:id', (req, res) => {
 router.delete('/cars/:id', (req, res) => {
   db.prepare(`UPDATE cars SET active=0 WHERE id=?`).run(req.params.id);
   res.json({ ok: true });
+});
+// Upload a photo for a specific car (shown on the rental agreement).
+router.post('/cars/:id/photo', carPhoto.single('photo'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Please choose an image file' });
+  const url = `/uploads/${req.file.filename}`;
+  const info = db.prepare(`UPDATE cars SET image_url=? WHERE id=?`).run(url, req.params.id);
+  if (!info.changes) return res.status(404).json({ error: 'Car not found' });
+  res.json({ ok: true, image_url: url });
 });
 
 /* ── category blocks ── */

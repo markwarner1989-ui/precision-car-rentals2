@@ -11,7 +11,7 @@ const router = express.Router();
 router.get('/:token', (req, res) => {
   const b = db.prepare(`SELECT * FROM bookings WHERE agreement_token = ?`).get(req.params.token);
   if (!b) return res.status(404).json({ error: 'Agreement not found' });
-  const car = b.assigned_car_id ? db.prepare(`SELECT * FROM cars WHERE id = ?`).get(b.assigned_car_id) : null;
+  const car = b.assigned_car_id ? db.prepare(`SELECT c.*, cat.name AS category_name FROM cars c JOIN categories cat ON cat.id=c.category_id WHERE c.id = ?`).get(b.assigned_car_id) : null;
   res.json({
     reference: b.reference,
     status: b.agreement_status,
@@ -39,7 +39,7 @@ router.post('/:token/sign', async (req, res) => {
     if (!initials?.[c.key]?.trim()) return res.status(400).json({ error: `Please initial: ${c.text}` });
   }
 
-  const car = b.assigned_car_id ? db.prepare(`SELECT * FROM cars WHERE id = ?`).get(b.assigned_car_id) : null;
+  const car = b.assigned_car_id ? db.prepare(`SELECT c.*, cat.name AS category_name FROM cars c JOIN categories cat ON cat.id=c.category_id WHERE c.id = ?`).get(b.assigned_car_id) : null;
   const signedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
   const filename = await generateAgreementPDF(b, car, { initials, fullName, signedAt });
 

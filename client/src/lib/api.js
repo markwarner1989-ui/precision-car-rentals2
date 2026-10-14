@@ -19,6 +19,7 @@ export const api = {
   adminPost: (path, token, body) => fetch(`${BASE}/admin${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body || {}) }).then(json),
   adminPut: (path, token, body) => fetch(`${BASE}/admin${path}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body || {}) }).then(json),
   adminPatch: (path, token, body) => fetch(`${BASE}/admin${path}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body || {}) }).then(json),
+  adminUpload: (path, token, fd) => fetch(`${BASE}/admin${path}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd }).then(json),
   adminDelete: (path, token) => fetch(`${BASE}/admin${path}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }).then(json),
 };
 export const money = (n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0);

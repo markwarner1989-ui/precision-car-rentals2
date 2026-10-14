@@ -270,22 +270,39 @@ function CarsManager({ token }) {
     load();
   }
   async function remove(id) { if (confirm('Remove this car?')) { await api.adminDelete(`/cars/${id}`, token); load(); } }
+  async function uploadPhoto(id, file) {
+    const fd = new FormData(); fd.append('photo', file);
+    try { await api.adminUpload(`/cars/${id}/photo`, token, fd); load(); }
+    catch (e) { alert(e.message); }
+  }
 
   return (
     <div className="split">
       <div className="panel panel-pad">
         <h2 className="section-title" style={{ fontSize: 20 }}>Vehicle inventory</h2>
         <p className="section-sub">Each car carries its VIN and plate — these auto-fill the rental agreement when you assign it.</p>
+        <p className="section-sub" style={{ marginTop: -8 }}>Add a photo per car — it appears on that car's rental agreement. No photo? The class illustration is used.</p>
         <table className="bk-table">
-          <thead><tr><th>Class</th><th>Vehicle</th><th>Plate</th><th>VIN</th><th></th></tr></thead>
+          <thead><tr><th>Photo</th><th>Class</th><th>Vehicle</th><th>Plate</th><th>VIN</th><th></th></tr></thead>
           <tbody>
             {cars.map((c) => (
               <tr key={c.id}>
+                <td>
+                  {c.image_url
+                    ? <img src={c.image_url} alt="" style={{ width: 64, height: 40, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--line)' }} />
+                    : <span style={{ color: 'var(--ink-soft)', fontSize: 12 }}>—</span>}
+                </td>
                 <td>{c.category_name}</td>
                 <td>{c.year} {c.make} {c.model} <span style={{ color: 'var(--ink-soft)' }}>({c.color})</span></td>
                 <td>{c.license_plate}</td>
                 <td style={{ fontSize: 12 }}>{c.vin}</td>
-                <td><button className="btn btn-ghost btn-sm" onClick={() => remove(c.id)}>Remove</button></td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer', marginRight: 6 }}>
+                    {c.image_url ? 'Change' : 'Add photo'}
+                    <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => e.target.files[0] && uploadPhoto(c.id, e.target.files[0])} />
+                  </label>
+                  <button className="btn btn-ghost btn-sm" onClick={() => remove(c.id)}>Remove</button>
+                </td>
               </tr>
             ))}
           </tbody>
