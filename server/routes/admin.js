@@ -139,6 +139,7 @@ function shape(b) {
     insurance_urls: safe(b.insurance_files).map((f) => `/uploads/${f}`),
     assigned_car: car ? { desc: `${car.year} ${car.make} ${car.model} (${car.color})`, vin: car.vin, plate: car.license_plate } : null,
     agreement_url: b.agreement_file ? `/agreements/${b.agreement_file}` : null,
+    sign_path: b.agreement_token ? `/sign/${b.agreement_token}` : null,
   };
 }
 function safe(s) { try { return JSON.parse(s || '[]'); } catch { return []; } }

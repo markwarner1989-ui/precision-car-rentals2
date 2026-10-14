@@ -16,7 +16,11 @@ const router = express.Router();
 const uploadsDir = path.join(__dirname, '..', 'uploads');
 fs.mkdirSync(uploadsDir, { recursive: true });
 const storage = multer.diskStorage({
-  destination: uploadsDir,
+  // Recreate the folder on every upload so it survives a disk reset (e.g. free-tier restart).
+  destination: (req, file, cb) => {
+    try { fs.mkdirSync(uploadsDir, { recursive: true }); cb(null, uploadsDir); }
+    catch (e) { cb(e); }
+  },
   filename: (req, file, cb) => cb(null, `${Date.now()}-${nanoid(6)}-${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`),
 });
 const upload = multer({
