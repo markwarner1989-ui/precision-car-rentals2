@@ -76,6 +76,28 @@ router.put('/categories/:id', (req, res) => {
     .run(name, example, description, image_url, daily_rate, deposit, sort_order || 0, active ? 1 : 0, req.params.id);
   res.json({ ok: true });
 });
+// Lightweight pricing update — only the daily rate and deposit for a class.
+router.patch('/categories/:id/pricing', (req, res) => {
+  const daily = Number(req.body.daily_rate);
+  const dep = Number(req.body.deposit);
+  if (!Number.isFinite(daily) || !Number.isFinite(dep) || daily < 0 || dep < 0)
+    return res.status(400).json({ error: 'Daily rate and deposit must be positive numbers' });
+  const info = db.prepare(`UPDATE categories SET daily_rate=?, deposit=? WHERE id=?`).run(daily, dep, req.params.id);
+  if (!info.changes) return res.status(404).json({ error: 'Class not found' });
+  res.json({ ok: true });
+});
+
+/* ── insurance pricing ── */
+router.get('/insurance', (req, res) => {
+  res.json({ insurance: db.prepare(`SELECT code,label,surcharge_daily FROM insurance_options ORDER BY sort_order`).all() });
+});
+router.patch('/insurance/:code', (req, res) => {
+  const amt = Number(req.body.surcharge_daily);
+  if (!Number.isFinite(amt) || amt < 0) return res.status(400).json({ error: 'Price must be a positive number' });
+  const info = db.prepare(`UPDATE insurance_options SET surcharge_daily=? WHERE code=?`).run(amt, req.params.code);
+  if (!info.changes) return res.status(404).json({ error: 'Insurance option not found' });
+  res.json({ ok: true });
+});
 
 /* ── cars (full inventory with VIN + plate) ── */
 router.get('/cars', (req, res) => {
