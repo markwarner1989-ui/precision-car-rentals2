@@ -50,7 +50,7 @@ function Dashboard({ token, onLogout }) {
           </div>
         )}
         <div className="tabs">
-          {['bookings', 'cars', 'availability'].map((v) => (
+          {['bookings', 'cars', 'pricing', 'availability'].map((v) => (
             <button key={v} className={`tab ${view === v ? 'active' : ''}`} onClick={() => setView(v)}>{v[0].toUpperCase() + v.slice(1)}</button>
           ))}
         </div>
@@ -65,6 +65,7 @@ function Dashboard({ token, onLogout }) {
           </>
         )}
         {view === 'cars' && <CarsManager token={token} />}
+        {view === 'pricing' && <PricingManager token={token} />}
         {view === 'availability' && <Availability token={token} />}
       </div>
       {active && <BookingModal booking={active} token={token} onClose={() => setActive(null)} onChanged={() => { setActive(null); refresh(); }} />}
@@ -181,6 +182,73 @@ function BookingModal({ booking: b, token, onClose, onChanged }) {
             <button className="btn btn-ghost btn-block" onClick={onClose}>Close</button>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+function PricingManager({ token }) {
+  const [cats, setCats] = useState([]);
+  const [ins, setIns] = useState([]);
+  const [saving, setSaving] = useState('');
+  const [msg, setMsg] = useState('');
+
+  const load = () => {
+    api.adminGet('/categories', token).then((d) => setCats(d.categories)).catch(() => {});
+    api.adminGet('/insurance', token).then((d) => setIns(d.insurance)).catch(() => {});
+  };
+  useEffect(() => { load(); }, []);
+
+  const setCat = (id, field, val) => setCats(cats.map((c) => c.id === id ? { ...c, [field]: val } : c));
+  const setInsVal = (code, val) => setIns(ins.map((i) => i.code === code ? { ...i, surcharge_daily: val } : i));
+
+  async function saveCat(c) {
+    setSaving(c.id); setMsg('');
+    try { await api.adminPatch(`/categories/${c.id}/pricing`, token, { daily_rate: Number(c.daily_rate), deposit: Number(c.deposit) }); setMsg(`Saved ${c.name}`); }
+    catch (e) { setMsg(e.message); } finally { setSaving(''); }
+  }
+  async function saveIns(i) {
+    setSaving(i.code); setMsg('');
+    try { await api.adminPatch(`/insurance/${i.code}`, token, { surcharge_daily: Number(i.surcharge_daily) }); setMsg(`Saved ${i.label}`); }
+    catch (e) { setMsg(e.message); } finally { setSaving(''); }
+  }
+
+  return (
+    <div>
+      {msg && <div className="note note-info">{msg}</div>}
+      <div className="panel panel-pad" style={{ marginBottom: 24 }}>
+        <h2 className="section-title" style={{ fontSize: 20 }}>Vehicle class pricing</h2>
+        <p className="section-sub">Set each class's daily rate and the fixed deposit customers pay now. Changes take effect immediately on the booking site.</p>
+        <table className="bk-table">
+          <thead><tr><th>Class</th><th>Daily rate ($)</th><th>Deposit ($)</th><th></th></tr></thead>
+          <tbody>
+            {cats.map((c) => (
+              <tr key={c.id}>
+                <td><strong>{c.name}</strong></td>
+                <td><input className="input" type="number" min="0" step="1" value={c.daily_rate} onChange={(e) => setCat(c.id, 'daily_rate', e.target.value)} style={{ maxWidth: 120 }} /></td>
+                <td><input className="input" type="number" min="0" step="1" value={c.deposit} onChange={(e) => setCat(c.id, 'deposit', e.target.value)} style={{ maxWidth: 120 }} /></td>
+                <td><button className="btn btn-teal btn-sm" disabled={saving === c.id} onClick={() => saveCat(c)}>{saving === c.id ? 'Saving…' : 'Save'}</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="panel panel-pad">
+        <h2 className="section-title" style={{ fontSize: 20 }}>Insurance pricing</h2>
+        <p className="section-sub">What customers pay us per day based on their coverage. Collision is added to the pickup balance; the Precision package is added to the deposit.</p>
+        <table className="bk-table">
+          <thead><tr><th>Option</th><th>Price per day ($)</th><th></th></tr></thead>
+          <tbody>
+            {ins.map((i) => (
+              <tr key={i.code}>
+                <td><strong>{i.label}</strong> {i.code === 'full' && <span style={{ color: 'var(--ink-soft)' }}>(no charge)</span>}</td>
+                <td><input className="input" type="number" min="0" step="1" value={i.surcharge_daily} onChange={(e) => setInsVal(i.code, e.target.value)} style={{ maxWidth: 120 }} /></td>
+                <td><button className="btn btn-teal btn-sm" disabled={saving === i.code} onClick={() => saveIns(i)}>{saving === i.code ? 'Saving…' : 'Save'}</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
