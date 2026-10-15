@@ -354,7 +354,10 @@ function CustomersView({ token }) {
 
 function DashboardView({ token }) {
   const [d, setD] = useState(null);
-  useEffect(() => { api.adminGet('/dashboard', token).then(setD).catch(() => {}); }, []);
+  const [err, setErr] = useState('');
+  const load = () => { setErr(''); api.adminGet('/dashboard', token).then(setD).catch((e) => setErr(e.message || 'Could not reach the server')); };
+  useEffect(() => { load(); }, []);
+  if (err) return <div className="panel panel-pad"><div className="note note-error">Couldn’t load the dashboard: {err}</div><button className="btn btn-ghost btn-sm" onClick={load}>Retry</button></div>;
   if (!d) return <div className="panel panel-pad">Loading dashboard…</div>;
   const t = d.totals;
   const maxTrend = Math.max(1, ...d.trend.map((x) => x.count));
@@ -407,8 +410,11 @@ function DashboardView({ token }) {
 
 function CalendarView({ token }) {
   const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
   const [monthOffset, setMonthOffset] = useState(0);
-  useEffect(() => { api.adminGet('/calendar', token).then(setData).catch(() => {}); }, []);
+  const load = () => { setErr(''); api.adminGet('/calendar', token).then(setData).catch((e) => setErr(e.message || 'Could not reach the server')); };
+  useEffect(() => { load(); }, []);
+  if (err) return <div className="panel panel-pad"><div className="note note-error">Couldn’t load the calendar: {err}</div><button className="btn btn-ghost btn-sm" onClick={load}>Retry</button></div>;
   if (!data) return <div className="panel panel-pad">Loading calendar…</div>;
 
   const base = new Date(); base.setDate(1); base.setMonth(base.getMonth() + monthOffset);

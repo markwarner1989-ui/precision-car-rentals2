@@ -4,6 +4,17 @@ async function json(res) {
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
 }
+
+// Admin calls: if the session is stale (token expired, or the server's JWT secret changed
+// after a redeploy), clear it and go back to the login screen instead of hanging on "Loading…".
+async function adminJson(res) {
+  if (res.status === 401) {
+    localStorage.removeItem('pcr_admin');
+    setTimeout(() => window.location.reload(), 50);
+    throw new Error('Session expired — please sign in again');
+  }
+  return json(res);
+}
 export const api = {
   meta: () => fetch(`${BASE}/meta`).then(json),
   categories: (pickup, ret) => fetch(`${BASE}/categories${pickup && ret ? `?pickup=${encodeURIComponent(pickup)}&return=${encodeURIComponent(ret)}` : ''}`).then(json),
@@ -15,11 +26,11 @@ export const api = {
   signAgreement: (token, body) => fetch(`${BASE}/agreement/${token}/sign`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   // admin
   login: (email, password) => fetch(`${BASE}/admin/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) }).then(json),
-  adminGet: (path, token) => fetch(`${BASE}/admin${path}`, { headers: { Authorization: `Bearer ${token}` } }).then(json),
-  adminPost: (path, token, body) => fetch(`${BASE}/admin${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body || {}) }).then(json),
-  adminPut: (path, token, body) => fetch(`${BASE}/admin${path}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body || {}) }).then(json),
-  adminPatch: (path, token, body) => fetch(`${BASE}/admin${path}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body || {}) }).then(json),
-  adminUpload: (path, token, fd) => fetch(`${BASE}/admin${path}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd }).then(json),
-  adminDelete: (path, token) => fetch(`${BASE}/admin${path}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }).then(json),
+  adminGet: (path, token) => fetch(`${BASE}/admin${path}`, { headers: { Authorization: `Bearer ${token}` } }).then(adminJson),
+  adminPost: (path, token, body) => fetch(`${BASE}/admin${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body || {}) }).then(adminJson),
+  adminPut: (path, token, body) => fetch(`${BASE}/admin${path}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body || {}) }).then(adminJson),
+  adminPatch: (path, token, body) => fetch(`${BASE}/admin${path}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body || {}) }).then(adminJson),
+  adminUpload: (path, token, fd) => fetch(`${BASE}/admin${path}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd }).then(adminJson),
+  adminDelete: (path, token) => fetch(`${BASE}/admin${path}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }).then(adminJson),
 };
 export const money = (n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0);

@@ -1,9 +1,13 @@
 import db from './db.js';
 import { nanoid } from 'nanoid';
 
-db.prepare('DELETE FROM categories').run();
-db.prepare('DELETE FROM cars').run();
-db.prepare('DELETE FROM insurance_options').run();
+// Seed ONLY tables that are empty. Previously every restart deleted and re-created these
+// tables with brand-new random IDs, which wiped price/fleet/add-on edits and orphaned bookings.
+const isEmpty = (t) => db.prepare(`SELECT COUNT(*) n FROM ${t}`).get().n === 0;
+const needCats = isEmpty('categories');
+const needIns = isEmpty('insurance_options');
+const needAddons = isEmpty('addons');
+if (needCats) db.prepare('DELETE FROM cars').run(); // cars without categories would be orphans
 
 // ── Categories (with FIXED deposits) ──
 const categories = [
@@ -15,7 +19,7 @@ const categories = [
 ];
 const catIns = db.prepare(`INSERT INTO categories (id,name,example,description,image_url,daily_rate,deposit,sort_order,active) VALUES (@id,@name,@example,@description,@image_url,@daily_rate,@deposit,@sort_order,1)`);
 const catIds = {};
-for (const c of categories) { const id = nanoid(10); catIds[c.name] = id; catIns.run({ id, ...c }); }
+if (needCats) for (const c of categories) { const id = nanoid(10); catIds[c.name] = id; catIns.run({ id, ...c }); }
 
 // ── Cars (each with VIN + plate; a category can even be a single specific car) ──
 const cars = [
@@ -30,7 +34,7 @@ const cars = [
   { cat: 'Luxury', year: '2023', make: 'BMW', model: '540i', color: 'White', vin: 'WBA53BJ00PW000999', plate: 'PCR-5001' },
 ];
 const carIns = db.prepare(`INSERT INTO cars (id,category_id,year,make,model,color,vin,license_plate,image_url,status,active) VALUES (@id,@category_id,@year,@make,@model,@color,@vin,@license_plate,@image_url,'available',1)`);
-for (const c of cars) {
+if (needCats) for (const c of cars) {
   carIns.run({ id: nanoid(10), category_id: catIds[c.cat], year: c.year, make: c.make, model: c.model, color: c.color, vin: c.vin, license_plate: c.plate, image_url: null });
 }
 
@@ -62,10 +66,9 @@ const insurance = [
   },
 ];
 const insIns = db.prepare(`INSERT INTO insurance_options (id,code,label,has_own,surcharge_daily,surcharge_target,requires_docs,followup_text,allowed,sort_order) VALUES (@id,@code,@label,@has_own,@surcharge_daily,@surcharge_target,@requires_docs,@followup_text,@allowed,@sort_order)`);
-for (const i of insurance) insIns.run({ id: nanoid(10), ...i });
+if (needIns) for (const i of insurance) insIns.run({ id: nanoid(10), ...i });
 
 // ── Add-ons (10 defaults; admin can add/edit/remove) ──
-db.prepare('DELETE FROM addons').run();
 const addons = [
   { code: 'prepaid_fuel', label: 'Prepaid Fuel', description: 'Return the car at any fuel level — no refueling worries.', price: 75, per: 'rental' },
   { code: 'child_seat', label: 'Child Safety Seat', description: 'Rear-facing or forward-facing seat for infants and toddlers.', price: 12, per: 'day' },
@@ -79,6 +82,6 @@ const addons = [
   { code: 'wifi', label: 'Mobile Wi-Fi Hotspot', description: 'Stay connected on the road with a portable hotspot.', price: 10, per: 'day' },
 ];
 const addIns = db.prepare(`INSERT INTO addons (id,code,label,description,price,per,active,sort_order) VALUES (?,?,?,?,?,?,1,?)`);
-addons.forEach((a, i) => addIns.run(nanoid(10), a.code, a.label, a.description, a.price, a.per, i + 1));
+if (needAddons) addons.forEach((a, i) => addIns.run(nanoid(10), a.code, a.label, a.description, a.price, a.per, i + 1));
 
-console.log(`Seeded ${categories.length} categories, ${cars.length} cars, ${insurance.length} insurance options, ${addons.length} add-ons.`);
+console.log(`Seed check — categories+cars: ${needCats ? 'seeded' : 'kept'}, insurance: ${needIns ? 'seeded' : 'kept'}, add-ons: ${needAddons ? 'seeded' : 'kept'}.`);
