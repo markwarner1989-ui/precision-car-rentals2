@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 220" width="640" height="220">
+  <defs>
+    <linearGradient id="emblem" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d3b40"/>
+      <stop offset="1" stop-color="#0a2e32"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f0b45e"/>
+      <stop offset="1" stop-color="#e08a2b"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Emblem: shield/speed badge -->
+  <g transform="translate(14,18)">
+    <path d="M92 2 L170 24 Q178 26 178 48 L178 118 Q178 150 92 184 Q6 150 6 118 L6 48 Q6 26 14 24 Z" fill="url(#emblem)"/>
+    <path d="M92 2 L170 24 Q178 26 178 48 L178 118 Q178 150 92 184 Q6 150 6 118 L6 48 Q6 26 14 24 Z" fill="none" stroke="url(#gold)" stroke-width="2.5"/>
+    <!-- speed arc (precision gauge) -->
+    <path d="M44 120 A52 52 0 1 1 140 120" fill="none" stroke="url(#gold)" stroke-width="6" stroke-linecap="round"/>
+    <!-- gauge ticks -->
+    <g stroke="#cfe0dd" stroke-width="3" stroke-linecap="round">
+      <line x1="44" y1="120" x2="52" y2="112"/>
+      <line x1="92" y1="64" x2="92" y2="76"/>
+      <line x1="140" y1="120" x2="132" y2="112"/>
+    </g>
+    <!-- needle -->
+    <line x1="92" y1="120" x2="124" y2="86" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="92" cy="120" r="8" fill="url(#gold)"/>
+    <!-- motion lines (road / speed) -->
+    <g stroke="#cfe0dd" stroke-width="4" stroke-linecap="round" opacity="0.85">
+      <line x1="40" y1="146" x2="86" y2="146"/>
+      <line x1="56" y1="158" x2="100" y2="158"/>
+    </g>
+  </g>
+
+  <!-- Wordmark -->
+  <g transform="translate(210,70)">
+    <text x="0" y="0" font-family="Georgia, 'Times New Roman', serif" font-weight="700" font-size="46" letter-spacing="0.5" fill="#0d3b40">PRECISION</text>
+    <text x="2" y="42" font-family="Arial, Helvetica, sans-serif" font-weight="600" font-size="22" letter-spacing="7" fill="#e08a2b">CAR RENTALS</text>
+    <line x1="2" y1="58" x2="388" y2="58" stroke="#e2ddd1" stroke-width="2"/>
+    <text x="2" y="80" font-family="Arial, Helvetica, sans-serif" font-weight="500" font-size="13" letter-spacing="2.5" fill="#33474d">CHARLOTTE AIRPORT · GASTONIA, NC</text>
+  </g>
+</svg>

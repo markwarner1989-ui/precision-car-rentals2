@@ -45,7 +45,8 @@ const catById = db.prepare(`SELECT * FROM categories WHERE id = ? AND active = 1
 router.get('/meta', (req, res) => {
   const insurance = db.prepare(`SELECT code,label,has_own,surcharge_daily,surcharge_target,requires_docs,followup_text,allowed FROM insurance_options ORDER BY sort_order`).all()
     .map((i) => ({ ...i, requires_docs: JSON.parse(i.requires_docs || '[]'), allowed: !!i.allowed, has_own: !!i.has_own }));
-  res.json({ paymentMode, pickupLocations: PICKUP_LOCATIONS, insurance, docLabels: DOC_LABELS });
+  const addons = db.prepare(`SELECT code,label,description,price,per FROM addons WHERE active=1 ORDER BY sort_order`).all();
+  res.json({ paymentMode, pickupLocations: PICKUP_LOCATIONS, insurance, docLabels: DOC_LABELS, addons });
 });
 
 // Categories with availability + representative car photos/examples for the dates.
@@ -120,6 +121,28 @@ router.post('/bookings', upload.any(), async (req, res) => {
     }
 
     const q = quote(cat, b.pickup, b.return, b.coverageCode);
+
+    
+    // Add-ons: b.addons is a JSON array of codes the customer selected.
+    let selectedAddons = [];
+    let addonsTotal = 0;
+    try {
+      const codes = JSON.parse(b.addons || '[]');
+      if (Array.isArray(codes) && codes.length) {
+        const rows = db.prepare(`SELECT code,label,price,per FROM addons WHERE active=1`).all();
+        for (const code of codes) {
+          const a = rows.find((r) => r.code === code);
+          if (a) {
+            const lineTotal = a.per === 'day' ? +(a.price * q.days).toFixed(2) : +a.price.toFixed(2);
+            selectedAddons.push({ code: a.code, label: a.label, price: a.price, per: a.per, total: lineTotal });
+            addonsTotal += lineTotal;
+          }
+        }
+        addonsTotal = +addonsTotal.toFixed(2);
+      }
+    } catch { /* ignore malformed */ }
+    const dueAtPickupWithAddons = +(q.dueAtPickup + addonsTotal).toFixed(2);
+
     const reference = 'PCR-' + nanoid(8).replace(/-/g, '0').toUpperCase();
 
     const pay = await chargeDeposit({
@@ -138,6 +161,7 @@ router.post('/bookings', upload.any(), async (req, res) => {
       coverage_code, coverage_label, surcharge_daily,
       daily_rate, rental_subtotal, surcharge_subtotal, deposit, due_at_pickup,
       license_file, insurance_files, billing_name, billing_address, card_last4,
+      addons, addons_total, lifecycle,
       payment_status, payment_ref, payment_mode, status
     ) VALUES (
       @id,@reference,@category_id,@category_name,@pickup_location,@delivery_address,@pickup_at,@return_at,@days,
@@ -145,6 +169,7 @@ router.post('/bookings', upload.any(), async (req, res) => {
       @coverage_code,@coverage_label,@surcharge_daily,
       @daily_rate,@rental_subtotal,@surcharge_subtotal,@deposit,@due_at_pickup,
       @license_file,@insurance_files,@billing_name,@billing_address,@card_last4,
+      @addons,@addons_total,'booking',
       'paid',@payment_ref,@payment_mode,'pending'
     )`).run({
       id, reference, category_id: cat.id, category_name: cat.name,
@@ -153,9 +178,10 @@ router.post('/bookings', upload.any(), async (req, res) => {
       first_name: b.firstName, last_name: b.lastName, dob: b.dob, address: b.address, cell_phone: b.cellPhone, email: b.email,
       coverage_code: ins.code, coverage_label: ins.label, surcharge_daily: ins.surcharge_daily,
       daily_rate: cat.daily_rate, rental_subtotal: q.rentalSubtotal, surcharge_subtotal: q.surchargeSubtotal,
-      deposit: q.deposit, due_at_pickup: q.dueAtPickup,
+      deposit: q.deposit, due_at_pickup: dueAtPickupWithAddons,
       license_file: licenseFile, insurance_files: JSON.stringify(insuranceFiles),
       billing_name: b.billingName || `${b.firstName} ${b.lastName}`, billing_address: b.billingAddress || b.address, card_last4: pay.last4 || '',
+      addons: JSON.stringify(selectedAddons), addons_total: addonsTotal,
       payment_ref: pay.ref, payment_mode: pay.mode,
     });
 
@@ -168,7 +194,7 @@ router.post('/bookings', upload.any(), async (req, res) => {
     });
 
     res.json({
-      ok: true, reference, deposit: q.deposit, dueAtPickup: q.dueAtPickup,
+      ok: true, reference, deposit: q.deposit, dueAtPickup: dueAtPickupWithAddons, addonsTotal,
       message: 'Thank you! We will contact you within one hour during business hours to approve your reservation. You can also call or text us. A valid driver\u2019s license and a debit/credit card showing your name are required at pickup.',
     });
   } catch (e) {

@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import db from '../lib/db.js';
-import { generateAgreementPDF, INITIAL_CLAUSES, AGREEMENTS_DIR } from '../lib/agreement.js';
+import { generateAgreementPDF, INITIAL_CLAUSES, AGREEMENTS_DIR, TERMS } from '../lib/agreement.js';
 import { sendEmail } from '../lib/email.js';
 
 const router = express.Router();
@@ -23,6 +23,7 @@ router.get('/:token', (req, res) => {
       deposit: b.deposit, due_at_pickup: b.due_at_pickup, category: b.category_name,
     },
     clauses: INITIAL_CLAUSES,
+    termsAndConditions: TERMS.map(([title, body]) => ({ title, body: body.replace(/\{company\}/g, process.env.BUSINESS_NAME || 'Precision Car Rentals') })),
     signed_at: b.agreement_signed_at,
   });
 });
@@ -33,18 +34,23 @@ router.post('/:token/sign', async (req, res) => {
   if (!b) return res.status(404).json({ error: 'Agreement not found' });
   if (b.agreement_status === 'signed') return res.status(409).json({ error: 'Already signed' });
 
-  const { initials, fullName } = req.body;
+  const { initials, fullName, termsAccepted } = req.body;
   if (!fullName || !fullName.trim()) return res.status(400).json({ error: 'Signature (full name) is required' });
+  if (!termsAccepted) return res.status(400).json({ error: 'You must read and accept the Terms & Conditions before signing.' });
   for (const c of INITIAL_CLAUSES) {
     if (!initials?.[c.key]?.trim()) return res.status(400).json({ error: `Please initial: ${c.text}` });
   }
 
+  // Audit trail for chargeback / dispute defense
+  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket?.remoteAddress || 'unknown';
+  const userAgent = req.headers['user-agent'] || 'unknown';
+
   const car = b.assigned_car_id ? db.prepare(`SELECT c.*, cat.name AS category_name FROM cars c JOIN categories cat ON cat.id=c.category_id WHERE c.id = ?`).get(b.assigned_car_id) : null;
   const signedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  const filename = await generateAgreementPDF(b, car, { initials, fullName, signedAt });
+  const filename = await generateAgreementPDF(b, car, { initials, fullName, signedAt, ip, userAgent, termsAccepted: true });
 
-  db.prepare(`UPDATE bookings SET agreement_status='signed', agreement_signed_at=?, agreement_file=? WHERE id=?`)
-    .run(signedAt, filename, b.id);
+  db.prepare(`UPDATE bookings SET agreement_status='signed', agreement_signed_at=?, agreement_file=?, sign_ip=?, sign_user_agent=?, terms_accepted=1 WHERE id=?`)
+    .run(signedAt, filename, ip, userAgent, b.id);
 
   // Email the signed copy to the customer.
   try {

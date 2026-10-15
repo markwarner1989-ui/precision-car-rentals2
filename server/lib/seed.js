@@ -64,4 +64,21 @@ const insurance = [
 const insIns = db.prepare(`INSERT INTO insurance_options (id,code,label,has_own,surcharge_daily,surcharge_target,requires_docs,followup_text,allowed,sort_order) VALUES (@id,@code,@label,@has_own,@surcharge_daily,@surcharge_target,@requires_docs,@followup_text,@allowed,@sort_order)`);
 for (const i of insurance) insIns.run({ id: nanoid(10), ...i });
 
-console.log(`Seeded ${categories.length} categories, ${cars.length} cars, ${insurance.length} insurance options.`);
+// ── Add-ons (10 defaults; admin can add/edit/remove) ──
+db.prepare('DELETE FROM addons').run();
+const addons = [
+  { code: 'prepaid_fuel', label: 'Prepaid Fuel', description: 'Return the car at any fuel level — no refueling worries.', price: 75, per: 'rental' },
+  { code: 'child_seat', label: 'Child Safety Seat', description: 'Rear-facing or forward-facing seat for infants and toddlers.', price: 12, per: 'day' },
+  { code: 'booster_seat', label: 'Booster Seat', description: 'For older children who have outgrown a car seat.', price: 8, per: 'day' },
+  { code: 'additional_driver', label: 'Additional Driver', description: 'Add a second authorized driver to the rental.', price: 10, per: 'day' },
+  { code: 'gps', label: 'GPS Navigation', description: 'Portable GPS unit with the latest maps.', price: 9, per: 'day' },
+  { code: 'toll_pass', label: 'Toll Pass', description: 'Electronic toll transponder — drive through all toll lanes.', price: 6, per: 'day' },
+  { code: 'roadside', label: 'Premium Roadside Assistance', description: '24/7 roadside help: lockout, jump-start, tire, fuel delivery.', price: 7, per: 'day' },
+  { code: 'unlimited_miles', label: 'Unlimited Mileage', description: 'No mileage cap for the entire rental.', price: 15, per: 'day' },
+  { code: 'ski_rack', label: 'Ski / Snowboard Rack', description: 'Roof rack for winter gear.', price: 11, per: 'day' },
+  { code: 'wifi', label: 'Mobile Wi-Fi Hotspot', description: 'Stay connected on the road with a portable hotspot.', price: 10, per: 'day' },
+];
+const addIns = db.prepare(`INSERT INTO addons (id,code,label,description,price,per,active,sort_order) VALUES (?,?,?,?,?,?,1,?)`);
+addons.forEach((a, i) => addIns.run(nanoid(10), a.code, a.label, a.description, a.price, a.per, i + 1));
+
+console.log(`Seeded ${categories.length} categories, ${cars.length} cars, ${insurance.length} insurance options, ${addons.length} add-ons.`);

@@ -34,4 +34,28 @@ export async function chargeDeposit({ amount, token, exp, name, street, zip, ref
   }
 }
 
+/**
+ * Refund (full or partial) against a prior transaction. In mock mode it simulates;
+ * in live mode it sends a cc:refund to Cardknox referencing the original xRefNum.
+ */
+export async function refund({ amount, originalRef, reference }) {
+  if (MODE === 'mock') {
+    return { ok: true, mode: 'mock', ref: 'MOCK-RFND-' + Math.random().toString(36).slice(2, 9).toUpperCase() };
+  }
+  if (!API_KEY) return { ok: false, mode: 'live', error: 'CARDKNOX_API_KEY not configured' };
+  const payload = {
+    xKey: API_KEY, xVersion: '5.0.0', xSoftwareName: 'PrecisionCarRentals', xSoftwareVersion: '2.0',
+    xCommand: 'cc:refund', xAmount: Number(amount).toFixed(2),
+    xRefNum: originalRef || '', xInvoice: reference || '', xDescription: 'Car rental refund',
+  };
+  try {
+    const res = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const data = await res.json();
+    if (data.xResult === 'A') return { ok: true, mode: 'live', ref: data.xRefNum, raw: data };
+    return { ok: false, mode: 'live', error: data.xError || `Refund ${data.xResult}`, raw: data };
+  } catch (err) {
+    return { ok: false, mode: 'live', error: err.message };
+  }
+}
+
 export const paymentMode = MODE;

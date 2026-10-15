@@ -16,6 +16,7 @@ export default function Booking({ meta }) {
   const pickupLocations = meta?.pickupLocations || {};
   const insuranceOptions = meta?.insurance || [];
   const docLabels = meta?.docLabels || {};
+  const addonOptions = meta?.addons || [];
 
   const [step, setStep] = useState(0);
   const [pickup, setPickup] = useState(isoLocal(dP));
@@ -30,6 +31,7 @@ export default function Booking({ meta }) {
   const [quote, setQuote] = useState(null);
   const [form, setForm] = useState({ firstName: '', lastName: '', dob: '', address: '', cellPhone: '', email: '' });
   const [docs, setDocs] = useState({}); // key -> File[]
+  const [selectedAddons, setSelectedAddons] = useState([]); // array of codes
   const [billing, setBilling] = useState({ billingName: '', billingAddress: '', billingZip: '' });
   const [cardToken, setCardToken] = useState('');
   const [cardExp, setCardExp] = useState('');
@@ -77,6 +79,7 @@ export default function Booking({ meta }) {
       Object.entries(billing).forEach(([k, v]) => fd.append(k, v));
       fd.append('paymentToken', cardToken || 'tok_mock');
       fd.append('cardExp', cardExp);
+      fd.append('addons', JSON.stringify(selectedAddons));
       requiredDocs.forEach((key) => (docs[key] || []).forEach((f) => fd.append(key, f)));
       const res = await api.createBooking(fd);
       setConfirmation(res);
@@ -105,7 +108,7 @@ export default function Booking({ meta }) {
             {step === 1 && <VehicleStep {...{ cats, catId, setCatId }} />}
             {step === 2 && <InsuranceStep {...{ insuranceOptions, coverage, setCoverage, hasOwn, setHasOwn }} />}
             {step === 3 && <CoverageFollowupStep {...{ followup, selectedCat }} />}
-            {step === 4 && <DetailsStep {...{ form, setForm, docs, setDocs, requiredDocs, docLabels, followup }} />}
+            {step === 4 && <DetailsStep {...{ form, setForm, docs, setDocs, requiredDocs, docLabels, followup, addonOptions, selectedAddons, setSelectedAddons, quote }} />}
             {step === 5 && <PaymentStep {...{ quote, selectedCat, billing, setBilling, cardToken, setCardToken, cardExp, setCardExp, paymentMode, form }} />}
 
             <div className="row-between">
@@ -120,7 +123,7 @@ export default function Booking({ meta }) {
             </div>
           </div>
           <aside className="summary">
-            <SummaryCard {...{ selectedCat, quote, pickup, ret, pickupLoc, pickupLocations, coverage, followup }} />
+            <SummaryCard {...{ selectedCat, quote, pickup, ret, pickupLoc, pickupLocations, coverage, followup, addonOptions, selectedAddons }} />
           </aside>
         </div>
       </div>
@@ -260,9 +263,11 @@ function Uploader({ label, hint, files, onFiles, multiple }) {
   );
 }
 
-function DetailsStep({ form, setForm, docs, setDocs, requiredDocs, docLabels, followup }) {
+function DetailsStep({ form, setForm, docs, setDocs, requiredDocs, docLabels, followup, addonOptions, selectedAddons, setSelectedAddons, quote }) {
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const setDoc = (key) => (files) => setDocs({ ...docs, [key]: files });
+  const days = quote?.days || 1;
+  const toggleAddon = (code) => setSelectedAddons(selectedAddons.includes(code) ? selectedAddons.filter((c) => c !== code) : [...selectedAddons, code]);
   return (
     <div>
       <h2 className="section-title">Your details & documents</h2>
@@ -289,6 +294,30 @@ function DetailsStep({ form, setForm, docs, setDocs, requiredDocs, docLabels, fo
           </div>
         ))}
       </div>
+
+      {addonOptions.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <h3 className="section-title" style={{ fontSize: 18 }}>Add-ons <span className="hint" style={{ fontWeight: 400 }}>(optional)</span></h3>
+          <p className="section-sub">Enhance your rental. Charged to your pickup balance.</p>
+          <div style={{ display: 'grid', gap: 10 }}>
+            {addonOptions.map((a) => {
+              const on = selectedAddons.includes(a.code);
+              const price = a.per === 'day' ? `${money(a.price)}/day` : money(a.price);
+              const lineTotal = a.per === 'day' ? a.price * days : a.price;
+              return (
+                <label key={a.code} className={`cov ${on ? 'selected' : ''}`} style={{ display: 'flex', gap: 12, alignItems: 'center', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={on} onChange={() => toggleAddon(a.code)} style={{ width: 18, height: 18 }} />
+                  <div style={{ flex: 1 }}>
+                    <strong>{a.label}</strong> <span style={{ color: 'var(--ink-soft)' }}>— {price}</span>
+                    {a.description && <div style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{a.description}</div>}
+                  </div>
+                  <div style={{ fontWeight: 700, color: 'var(--teal)' }}>{money(lineTotal)}</div>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -315,7 +344,10 @@ function PaymentStep({ quote, selectedCat, billing, setBilling, cardToken, setCa
   );
 }
 
-function SummaryCard({ selectedCat, quote, pickup, ret, pickupLoc, pickupLocations, coverage, followup }) {
+function SummaryCard({ selectedCat, quote, pickup, ret, pickupLoc, pickupLocations, coverage, followup, addonOptions = [], selectedAddons = [] }) {
+  const days = quote?.days || 1;
+  const addonLines = addonOptions.filter((a) => selectedAddons.includes(a.code)).map((a) => ({ label: a.label, total: a.per === 'day' ? a.price * days : a.price }));
+  const addonsTotal = addonLines.reduce((s, a) => s + a.total, 0);
   return (
     <div className="panel panel-pad">
       <h3 className="section-title" style={{ fontSize: 20 }}>Your booking</h3>
@@ -333,7 +365,8 @@ function SummaryCard({ selectedCat, quote, pickup, ret, pickupLoc, pickupLocatio
               <div style={{ marginTop: 14 }}>
                 <div className="sum-row"><span>Rental · {quote.days}d × {money(quote.dailyRate)}</span><span>{money(quote.rentalSubtotal)}</span></div>
                 {quote.surchargeSubtotal > 0 && !toDeposit && <div className="sum-row"><span>{surLabel} · {quote.days}d</span><span>{money(quote.surchargeSubtotal)}</span></div>}
-                <div className="sum-row total"><span>Due at pickup</span><strong>{money(quote.dueAtPickup)}</strong></div>
+                {addonLines.map((a, i) => <div className="sum-row" key={i}><span>{a.label}</span><span>{money(a.total)}</span></div>)}
+                <div className="sum-row total"><span>Due at pickup</span><strong>{money(quote.dueAtPickup + addonsTotal)}</strong></div>
                 <div className="sum-due-now">
                   <div className="lbl">Due now — deposit</div>
                   <div className="amt">{money(quote.deposit)}</div>

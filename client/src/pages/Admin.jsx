@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api, money } from '../lib/api.js';
 
 export default function Admin() {
@@ -25,7 +25,7 @@ function Login({ onLogin }) {
 
 function Dashboard({ token, onLogout }) {
   const [stats, setStats] = useState(null);
-  const [view, setView] = useState('bookings');
+  const [view, setView] = useState('dashboard');
   const [tab, setTab] = useState('pending');
   const [bookings, setBookings] = useState([]);
   const [active, setActive] = useState(null);
@@ -50,7 +50,7 @@ function Dashboard({ token, onLogout }) {
           </div>
         )}
         <div className="tabs">
-          {['bookings', 'cars', 'pricing', 'availability'].map((v) => (
+          {['dashboard', 'bookings', 'rentals', 'customers', 'cars', 'pricing', 'addons', 'availability', 'calendar'].map((v) => (
             <button key={v} className={`tab ${view === v ? 'active' : ''}`} onClick={() => setView(v)}>{v[0].toUpperCase() + v.slice(1)}</button>
           ))}
         </div>
@@ -65,7 +65,12 @@ function Dashboard({ token, onLogout }) {
           </>
         )}
         {view === 'cars' && <CarsManager token={token} />}
+        {view === 'dashboard' && <DashboardView token={token} />}
+        {view === 'rentals' && <RentalsView token={token} onOpen={setActive} />}
+        {view === 'customers' && <CustomersView token={token} />}
         {view === 'pricing' && <PricingManager token={token} />}
+        {view === 'addons' && <AddonsManager token={token} />}
+        {view === 'calendar' && <CalendarView token={token} />}
         {view === 'availability' && <Availability token={token} />}
       </div>
       {active && <BookingModal booking={active} token={token} onClose={() => setActive(null)} onChanged={() => { setActive(null); refresh(); }} />}
@@ -115,6 +120,36 @@ function BookingModal({ booking: b, token, onClose, onChanged }) {
     catch (e) { alert(e.message); } finally { setBusy(false); }
   }
   async function decline() { setBusy(true); try { await api.adminPost(`/bookings/${b.id}/decline`, token, { notes }); onChanged(); } catch (e) { alert(e.message); } finally { setBusy(false); } }
+
+  // edit / lifecycle / refund state
+  const [editP, setEditP] = useState(b.pickup_at); const [editR, setEditR] = useState(b.return_at); const [editDue, setEditDue] = useState(b.due_at_pickup);
+  const [refundAmt, setRefundAmt] = useState('');
+  async function saveEdit() { setBusy(true); try { await api.adminPatch(`/bookings/${b.id}`, token, { pickup_at: editP, return_at: editR, due_at_pickup: Number(editDue) }); onChanged(); } catch (e) { alert(e.message); } finally { setBusy(false); } }
+  async function startRental() { setBusy(true); try { await api.adminPost(`/bookings/${b.id}/start`, token, {}); onChanged(); } catch (e) { alert(e.message); } finally { setBusy(false); } }
+  async function completeRental() { setBusy(true); try { await api.adminPost(`/bookings/${b.id}/complete`, token, {}); onChanged(); } catch (e) { alert(e.message); } finally { setBusy(false); } }
+  async function cancelBooking() { if (!confirm('Cancel this booking?')) return; setBusy(true); try { await api.adminPost(`/bookings/${b.id}/cancel`, token, { reason: notes }); onChanged(); } catch (e) { alert(e.message); } finally { setBusy(false); } }
+  async function doRefund() {
+    const amt = Number(refundAmt); if (!amt) { alert('Enter a refund amount'); return; }
+    setBusy(true);
+    try { const r = await api.adminPost(`/bookings/${b.id}/refund`, token, { amount: amt }); alert(`Refund processed: $${amt} (ref ${r.ref})`); onChanged(); }
+    catch (e) { alert(e.message); } finally { setBusy(false); }
+  }
+
+  // check-in / check-out
+  const [ciMiles, setCiMiles] = useState(b.checkin_data?.miles ?? ''); const [ciFuel, setCiFuel] = useState(b.checkin_data?.fuel ?? 'Full'); const [ciFiles, setCiFiles] = useState([]);
+  const [coMiles, setCoMiles] = useState(b.checkout_data?.miles ?? ''); const [coFuel, setCoFuel] = useState(b.checkout_data?.fuel ?? 'Full'); const [coFiles, setCoFiles] = useState([]);
+  async function inspect(kind, miles, fuel, files) {
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      if (miles !== '') fd.append('miles', miles);
+      fd.append('fuel', fuel);
+      Array.from(files || []).forEach((f) => fd.append('photos', f));
+      const r = await api.adminUpload(`/bookings/${b.id}/${kind}`, token, fd);
+      alert(`${kind === 'checkin' ? 'Check-in' : 'Check-out'} saved.${r.milesDriven != null ? ` Miles driven: ${r.milesDriven}` : ''}`);
+      onChanged();
+    } catch (e) { alert(e.message); } finally { setBusy(false); }
+  }
 
   const loc = b.pickup_location === 'delivery' ? `Delivery — ${b.delivery_address || ''}` : b.pickup_location === 'charlotte_airport' ? 'Charlotte Airport' : 'Gastonia';
   return (
@@ -179,9 +214,330 @@ function BookingModal({ booking: b, token, onClose, onChanged }) {
                 <a href={b.sign_path} target="_blank" rel="noreferrer">{window.location.origin}{b.sign_path}</a>
               </div>
             )}
-            <button className="btn btn-ghost btn-block" onClick={onClose}>Close</button>
+
+            {b.status === 'approved' && b.lifecycle !== 'cancelled' && (
+              <>
+                <div className="field" style={{ marginTop: 14 }}>
+                  <label><strong>Manage rental</strong></label>
+                  <div className="tabs" style={{ marginTop: 6 }}>
+                    {b.lifecycle === 'booking' && <button className="btn btn-teal btn-sm" disabled={busy} onClick={startRental}>Start rental (check-out car)</button>}
+                    {b.lifecycle === 'active' && <button className="btn btn-teal btn-sm" disabled={busy} onClick={completeRental}>Complete rental (return)</button>}
+                    <button className="btn btn-ghost btn-sm" disabled={busy} onClick={cancelBooking}>Cancel</button>
+                  </div>
+                </div>
+
+                <details style={{ marginTop: 10 }}>
+                  <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>Edit reservation (extend / change price)</summary>
+                  <div className="grid-2" style={{ marginTop: 10 }}>
+                    <div className="field"><label>Pickup</label><input className="input" type="datetime-local" value={(editP || '').slice(0, 16)} onChange={(e) => setEditP(e.target.value)} /></div>
+                    <div className="field"><label>Return</label><input className="input" type="datetime-local" value={(editR || '').slice(0, 16)} onChange={(e) => setEditR(e.target.value)} /></div>
+                  </div>
+                  <div className="field"><label>Balance due at pickup ($)</label><input className="input" type="number" min="0" value={editDue} onChange={(e) => setEditDue(e.target.value)} /></div>
+                  <button className="btn btn-teal btn-sm" disabled={busy} onClick={saveEdit}>Save changes</button>
+                </details>
+
+                <details style={{ marginTop: 10 }}>
+                  <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>Refund deposit {b.refunded_total > 0 && <span style={{ color: 'var(--ink-soft)' }}>(already refunded {money(b.refunded_total)})</span>}</summary>
+                  <div className="field" style={{ marginTop: 10 }}>
+                    <label>Refund amount ($) — deposit paid {money(b.deposit)}</label>
+                    <input className="input" type="number" min="0" value={refundAmt} onChange={(e) => setRefundAmt(e.target.value)} placeholder="Full or partial amount" />
+                  </div>
+                  <button className="btn btn-ghost btn-sm" disabled={busy} onClick={doRefund}>Process refund</button>
+                  {(b.refunds_list || []).length > 0 && (
+                    <div className="note note-info" style={{ marginTop: 10, fontSize: 13 }}>
+                      {b.refunds_list.map((r, i) => <div key={i}>{r.type} refund {money(r.amount)} · {r.at}</div>)}
+                    </div>
+                  )}
+                </details>
+
+                <details style={{ marginTop: 10 }} open={b.lifecycle === 'booking' || b.lifecycle === 'active'}>
+                  <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>Check-in / Check-out (photos + odometer + fuel)</summary>
+
+                  <div className="note note-info" style={{ marginTop: 10, fontSize: 13 }}>
+                    <strong>Check-in (before handing over the car)</strong>
+                    {b.checkin_data && <span> — recorded {b.checkin_data.at}: {b.checkin_data.miles} mi, fuel {b.checkin_data.fuel}, {(b.checkin_data.photos || []).length} photo(s)</span>}
+                  </div>
+                  <div className="grid-2">
+                    <div className="field"><label>Odometer (miles)</label><input className="input" type="number" value={ciMiles} onChange={(e) => setCiMiles(e.target.value)} /></div>
+                    <div className="field"><label>Fuel level</label><select className="select" value={ciFuel} onChange={(e) => setCiFuel(e.target.value)}><option>Full</option><option>3/4</option><option>1/2</option><option>1/4</option><option>Empty</option></select></div>
+                  </div>
+                  <div className="field"><label>Car photos</label><input type="file" accept="image/*" multiple onChange={(e) => setCiFiles(e.target.files)} /></div>
+                  <button className="btn btn-teal btn-sm" disabled={busy} onClick={() => inspect('checkin', ciMiles, ciFuel, ciFiles)}>Save check-in</button>
+                  {b.checkin_data?.photos?.length > 0 && <div className="doc-thumbs" style={{ marginTop: 8 }}>{b.checkin_data.photos.map((u, i) => <a key={i} href={u} target="_blank" rel="noreferrer">Photo {i + 1} ↗</a>)}</div>}
+
+                  <div className="note note-info" style={{ marginTop: 14, fontSize: 13 }}>
+                    <strong>Check-out (when the car is returned)</strong>
+                    {b.checkout_data && <span> — recorded {b.checkout_data.at}: {b.checkout_data.miles} mi, fuel {b.checkout_data.fuel}, {(b.checkout_data.photos || []).length} photo(s)</span>}
+                    {b.checkin_data?.miles != null && b.checkout_data?.miles != null && <div><strong>Miles driven: {b.checkout_data.miles - b.checkin_data.miles}</strong></div>}
+                  </div>
+                  <div className="grid-2">
+                    <div className="field"><label>Odometer (miles)</label><input className="input" type="number" value={coMiles} onChange={(e) => setCoMiles(e.target.value)} /></div>
+                    <div className="field"><label>Fuel level</label><select className="select" value={coFuel} onChange={(e) => setCoFuel(e.target.value)}><option>Full</option><option>3/4</option><option>1/2</option><option>1/4</option><option>Empty</option></select></div>
+                  </div>
+                  <div className="field"><label>Car photos</label><input type="file" accept="image/*" multiple onChange={(e) => setCoFiles(e.target.files)} /></div>
+                  <button className="btn btn-teal btn-sm" disabled={busy} onClick={() => inspect('checkout', coMiles, coFuel, coFiles)}>Save check-out</button>
+                  {b.checkout_data?.photos?.length > 0 && <div className="doc-thumbs" style={{ marginTop: 8 }}>{b.checkout_data.photos.map((u, i) => <a key={i} href={u} target="_blank" rel="noreferrer">Photo {i + 1} ↗</a>)}</div>}
+                </details>
+              </>
+            )}
+
+            <button className="btn btn-ghost btn-block" style={{ marginTop: 14 }} onClick={onClose}>Close</button>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+function RentalsView({ token, onOpen }) {
+  const [tab, setTab] = useState('active');
+  const [rows, setRows] = useState([]);
+  const load = () => api.adminGet(`/rentals?lifecycle=${tab}`, token).then((d) => setRows(d.bookings)).catch(() => {});
+  useEffect(() => { load(); }, [tab]);
+  const labels = { booking: 'Upcoming bookings', active: 'Active rentals', completed: 'Completed rentals', cancelled: 'Cancelled' };
+  return (
+    <div>
+      <p className="section-sub"><strong>Bookings</strong> are reservations not yet started. <strong>Rentals</strong> are cars currently out (active) or returned (completed).</p>
+      <div className="tabs">
+        {['booking', 'active', 'completed', 'cancelled'].map((t) => (
+          <button key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{labels[t]}</button>
+        ))}
+      </div>
+      {!rows.length ? <div className="panel panel-pad">Nothing here yet.</div> : (
+        <table className="bk-table">
+          <thead><tr><th>Ref</th><th>Customer</th><th>Class</th><th>Dates</th><th>Vehicle</th><th>Status</th></tr></thead>
+          <tbody>
+            {rows.map((b) => (
+              <tr key={b.id} className="clickable" onClick={() => onOpen(b)}>
+                <td><strong>{b.reference}</strong></td>
+                <td>{b.first_name} {b.last_name}</td>
+                <td>{b.category_name}</td>
+                <td>{b.pickup_at.slice(0, 10)} → {b.return_at.slice(0, 10)}</td>
+                <td>{b.assigned_car ? b.assigned_car.plate : '—'}</td>
+                <td><span className={`badge ${b.status}`}>{b.lifecycle}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function CustomersView({ token }) {
+  const [rows, setRows] = useState([]);
+  useEffect(() => { api.adminGet('/customers', token).then((d) => setRows(d.customers)).catch(() => {}); }, []);
+  return (
+    <div>
+      <h2 className="section-title" style={{ fontSize: 20 }}>Customers</h2>
+      <p className="section-sub">Everyone who has booked, with their totals.</p>
+      {!rows.length ? <div className="panel panel-pad">No customers yet.</div> : (
+        <table className="bk-table">
+          <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Bookings</th><th>Total deposits</th><th>Last booking</th></tr></thead>
+          <tbody>
+            {rows.map((c, i) => (
+              <tr key={i}>
+                <td><strong>{c.first_name} {c.last_name}</strong></td>
+                <td>{c.email}</td>
+                <td>{c.cell_phone}</td>
+                <td>{c.bookings}</td>
+                <td>{money(c.total_deposits)}</td>
+                <td>{(c.last_booking || '').slice(0, 10)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function DashboardView({ token }) {
+  const [d, setD] = useState(null);
+  useEffect(() => { api.adminGet('/dashboard', token).then(setD).catch(() => {}); }, []);
+  if (!d) return <div className="panel panel-pad">Loading dashboard…</div>;
+  const t = d.totals;
+  const maxTrend = Math.max(1, ...d.trend.map((x) => x.count));
+  const maxClass = Math.max(1, ...d.byClass.map((x) => x.count));
+  const palette = ['#0d3b40', '#e08a2b', '#1e7a46', '#2456a6', '#9a5a12'];
+  return (
+    <div>
+      <div className="stat-grid">
+        <Stat n={t.total} l="Total bookings" /><Stat n={t.active} l="Active rentals" /><Stat n={t.completed} l="Completed" />
+        <Stat n={money(t.deposits)} l="Deposits collected" /><Stat n={money(t.pickup_revenue)} l="Pickup revenue" /><Stat n={money(t.addon_revenue)} l="Add-on revenue" />
+      </div>
+      <div className="split" style={{ marginTop: 8 }}>
+        <div className="panel panel-pad">
+          <h3 className="section-title" style={{ fontSize: 18 }}>Bookings — last 14 days</h3>
+          {d.trend.length === 0 ? <p className="section-sub">No bookings yet.</p> : (
+            <svg viewBox="0 0 520 180" style={{ width: '100%', height: 'auto' }}>
+              {d.trend.map((x, i) => {
+                const bw = 520 / d.trend.length;
+                const h = (x.count / maxTrend) * 130;
+                return <g key={i}>
+                  <rect x={i * bw + 6} y={150 - h} width={bw - 12} height={h} rx="3" fill="#0d3b40" />
+                  <text x={i * bw + bw / 2} y={168} fontSize="8" fill="#888" textAnchor="middle">{x.day.slice(5)}</text>
+                  {x.count > 0 && <text x={i * bw + bw / 2} y={145 - h} fontSize="9" fill="#0d3b40" textAnchor="middle" fontWeight="bold">{x.count}</text>}
+                </g>;
+              })}
+            </svg>
+          )}
+        </div>
+        <div className="panel panel-pad">
+          <h3 className="section-title" style={{ fontSize: 18 }}>Bookings by vehicle class</h3>
+          {d.byClass.length === 0 ? <p className="section-sub">No bookings yet.</p> : (
+            <div style={{ display: 'grid', gap: 10, marginTop: 6 }}>
+              {d.byClass.map((c, i) => (
+                <div key={c.category_name}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 3 }}>
+                    <strong>{c.category_name}</strong><span>{c.count} · {money(c.deposits)}</span>
+                  </div>
+                  <div style={{ background: '#eee', borderRadius: 6, height: 16, overflow: 'hidden' }}>
+                    <div style={{ width: `${(c.count / maxClass) * 100}%`, height: '100%', background: palette[i % palette.length], borderRadius: 6 }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CalendarView({ token }) {
+  const [data, setData] = useState(null);
+  const [monthOffset, setMonthOffset] = useState(0);
+  useEffect(() => { api.adminGet('/calendar', token).then(setData).catch(() => {}); }, []);
+  if (!data) return <div className="panel panel-pad">Loading calendar…</div>;
+
+  const base = new Date(); base.setDate(1); base.setMonth(base.getMonth() + monthOffset);
+  const year = base.getFullYear(), month = base.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const monthLabel = base.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+  const inRange = (b, day) => {
+    const d = new Date(year, month, day);
+    const s = new Date(b.pickup_at.slice(0, 10)); const e = new Date(b.return_at.slice(0, 10));
+    return d >= new Date(s.toDateString()) && d <= new Date(e.toDateString());
+  };
+  const carBlocked = (carId, day) => {
+    const d = new Date(year, month, day);
+    return data.carBlocks.some((bl) => bl.car_id === carId && d >= new Date(bl.start_date) && d <= new Date(bl.end_date));
+  };
+
+  // group cars by class
+  const byClass = {};
+  data.cars.forEach((c) => { (byClass[c.category_name] ||= []).push(c); });
+
+  return (
+    <div className="panel panel-pad">
+      <div className="row-between" style={{ marginTop: 0 }}>
+        <h2 className="section-title" style={{ fontSize: 20, margin: 0 }}>Fleet calendar — {monthLabel}</h2>
+        <div>
+          <button className="btn btn-ghost btn-sm" onClick={() => setMonthOffset(monthOffset - 1)}>← Prev</button>
+          <button className="btn btn-ghost btn-sm" style={{ marginLeft: 6 }} onClick={() => setMonthOffset(0)}>Today</button>
+          <button className="btn btn-ghost btn-sm" style={{ marginLeft: 6 }} onClick={() => setMonthOffset(monthOffset + 1)}>Next →</button>
+        </div>
+      </div>
+      <p className="section-sub">Each row is one car, grouped by class. Amber = booked, grey = blocked (Turo/shop), empty = free.</p>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ borderCollapse: 'collapse', fontSize: 11, minWidth: 900 }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left', padding: '4px 8px', position: 'sticky', left: 0, background: '#fff', minWidth: 180 }}>Vehicle</th>
+              {days.map((d) => <th key={d} style={{ width: 22, padding: 2, color: '#888', fontWeight: 500 }}>{d}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {Object.entries(byClass).map(([cls, cars]) => (
+              <React.Fragment key={cls}>
+                <tr><td colSpan={daysInMonth + 1} style={{ background: '#f2efe6', fontWeight: 700, color: 'var(--teal)', padding: '4px 8px' }}>{cls}</td></tr>
+                {cars.map((car) => (
+                  <tr key={car.id}>
+                    <td style={{ padding: '3px 8px', position: 'sticky', left: 0, background: '#fff', whiteSpace: 'nowrap' }}>
+                      {car.year} {car.make} {car.model} <span style={{ color: '#999' }}>{car.license_plate}</span>
+                    </td>
+                    {days.map((day) => {
+                      const booking = data.bookings.find((b) => b.assigned_car_id === car.id && inRange(b, day));
+                      const blocked = carBlocked(car.id, day);
+                      const bg = booking ? '#e08a2b' : blocked ? '#c9ccce' : 'transparent';
+                      return <td key={day} title={booking ? `${booking.reference} — ${booking.first_name} ${booking.last_name}` : blocked ? 'Blocked' : ''}
+                        style={{ width: 22, height: 20, background: bg, border: '1px solid #f0ece3' }} />;
+                    })}
+                  </tr>
+                ))}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function AddonsManager({ token }) {
+  const [addons, setAddons] = useState([]);
+  const [nf, setNf] = useState({ label: '', description: '', price: '', per: 'rental' });
+  const [saving, setSaving] = useState('');
+  const [msg, setMsg] = useState('');
+  const load = () => api.adminGet('/addons', token).then((d) => setAddons(d.addons)).catch(() => {});
+  useEffect(() => { load(); }, []);
+
+  const setVal = (id, field, val) => setAddons(addons.map((a) => a.id === id ? { ...a, [field]: val } : a));
+  async function save(a) {
+    setSaving(a.id); setMsg('');
+    try { await api.adminPatch(`/addons/${a.id}`, token, { label: a.label, description: a.description, price: Number(a.price), per: a.per }); setMsg(`Saved ${a.label}`); }
+    catch (e) { setMsg(e.message); } finally { setSaving(''); }
+  }
+  async function remove(id) { if (confirm('Remove this add-on?')) { await api.adminDelete(`/addons/${id}`, token); load(); } }
+  async function add() {
+    if (!nf.label.trim() || nf.price === '') return;
+    setSaving('new'); setMsg('');
+    try { await api.adminPost('/addons', token, { ...nf, price: Number(nf.price) }); setNf({ label: '', description: '', price: '', per: 'rental' }); load(); setMsg('Add-on added'); }
+    catch (e) { setMsg(e.message); } finally { setSaving(''); }
+  }
+
+  return (
+    <div className="split">
+      <div className="panel panel-pad">
+        <h2 className="section-title" style={{ fontSize: 20 }}>Reservation add-ons</h2>
+        <p className="section-sub">Extras customers can add during booking. “Per day” multiplies by rental length; “Per rental” is a flat fee.</p>
+        {msg && <div className="note note-info">{msg}</div>}
+        <table className="bk-table">
+          <thead><tr><th>Name</th><th>Price ($)</th><th>Per</th><th></th></tr></thead>
+          <tbody>
+            {addons.map((a) => (
+              <tr key={a.id}>
+                <td style={{ minWidth: 180 }}>
+                  <input className="input" value={a.label} onChange={(e) => setVal(a.id, 'label', e.target.value)} />
+                  <input className="input" style={{ marginTop: 4, fontSize: 12 }} value={a.description || ''} onChange={(e) => setVal(a.id, 'description', e.target.value)} placeholder="Description" />
+                </td>
+                <td><input className="input" type="number" min="0" step="1" value={a.price} onChange={(e) => setVal(a.id, 'price', e.target.value)} style={{ maxWidth: 90 }} /></td>
+                <td>
+                  <select className="select" value={a.per} onChange={(e) => setVal(a.id, 'per', e.target.value)} style={{ maxWidth: 110 }}>
+                    <option value="rental">per rental</option><option value="day">per day</option>
+                  </select>
+                </td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  <button className="btn btn-teal btn-sm" style={{ marginRight: 6 }} disabled={saving === a.id} onClick={() => save(a)}>{saving === a.id ? '…' : 'Save'}</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => remove(a.id)}>Remove</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="panel panel-pad">
+        <h3 className="section-title" style={{ fontSize: 18 }}>Add a new add-on</h3>
+        <div className="field"><label>Name</label><input className="input" value={nf.label} onChange={(e) => setNf({ ...nf, label: e.target.value })} placeholder="e.g. Pet Fee" /></div>
+        <div className="field"><label>Description</label><input className="input" value={nf.description} onChange={(e) => setNf({ ...nf, description: e.target.value })} placeholder="Short description" /></div>
+        <div className="grid-2">
+          <div className="field"><label>Price ($)</label><input className="input" type="number" min="0" value={nf.price} onChange={(e) => setNf({ ...nf, price: e.target.value })} /></div>
+          <div className="field"><label>Charged</label><select className="select" value={nf.per} onChange={(e) => setNf({ ...nf, per: e.target.value })}><option value="rental">Per rental</option><option value="day">Per day</option></select></div>
+        </div>
+        <button className="btn btn-teal btn-block" disabled={saving === 'new'} onClick={add}>{saving === 'new' ? 'Adding…' : 'Add add-on'}</button>
       </div>
     </div>
   );

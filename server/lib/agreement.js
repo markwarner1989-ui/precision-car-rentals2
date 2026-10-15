@@ -23,7 +23,7 @@ export const INITIAL_CLAUSES = [
 ];
 
 // Full Terms & Conditions, adapted from the standard rental agreement. {company} is substituted.
-const TERMS = [
+export const TERMS = [
   ['Nature of this Agreement',
     'This Agreement is between you (the Renter) and {company} (the Licensee). {company} rents to you the vehicle identified on this Rental Record subject to these Terms and Conditions. You and Authorized Drivers are not agents of {company}, may not transfer the vehicle or any rights under this Agreement, and may not service or repair the vehicle without {company}’s prior approval. {company} MAKES NO EXPRESS OR IMPLIED WARRANTIES, INCLUDING ANY WARRANTY OF MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.'],
   ['Who May Drive the Vehicle',
@@ -162,6 +162,17 @@ export function generateAgreementPDF(booking, car, signature) {
   doc.font('Helvetica').fontSize(10).fillColor(INK).text(`$${booking.due_at_pickup.toFixed(2)}`, 430, payY + 12);
   doc.moveDown(0.8);
 
+  // Add-ons (if any)
+  let addonsArr = [];
+  try { addonsArr = JSON.parse(booking.addons || '[]'); } catch { addonsArr = []; }
+  if (addonsArr.length) {
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#444').text('Add-ons', L, doc.y);
+    addonsArr.forEach((a) => {
+      doc.font('Helvetica').fontSize(9.5).fillColor(INK).text(`• ${a.label} — $${Number(a.total).toFixed(2)}${a.per === 'day' ? ` (${a.price}/day)` : ''}`, L + 8, doc.y);
+    });
+    doc.moveDown(0.6);
+  }
+
   // Initialed acknowledgements
   sectionTitle('Acknowledged Terms (initialed by renter)');
   for (const c of INITIAL_CLAUSES) {
@@ -196,6 +207,19 @@ export function generateAgreementPDF(booking, car, signature) {
   doc.moveTo(L, doc.y + 2).lineTo(L + 320, doc.y + 2).stroke('#999');
   doc.font('Helvetica').fontSize(9).fillColor(SOFT).text(`Signed electronically on ${signature.signedAt}`, L, doc.y + 6);
   doc.text(`${company}${phone ? ' · ' + phone : ''}`, L);
+
+  // ── Electronic signature audit trail (chargeback / dispute defense) ──
+  doc.moveDown(1);
+  const ay = doc.y;
+  doc.roundedRect(L, ay, R - L, 72, 6).fillAndStroke('#f6f8f8', '#cfe0dd');
+  doc.fillColor(NAVY).font('Helvetica-Bold').fontSize(9).text('ELECTRONIC SIGNATURE AUDIT TRAIL', L + 12, ay + 8);
+  doc.font('Helvetica').fontSize(8).fillColor('#333');
+  doc.text(`Signer name: ${signature.fullName || '—'}`, L + 12, ay + 22);
+  doc.text(`Date & time (UTC): ${signature.signedAt}`, L + 12, ay + 33);
+  doc.text(`IP address: ${signature.ip || '—'}`, L + 12, ay + 44);
+  doc.text(`Terms & Conditions: ${signature.termsAccepted ? 'Read and accepted by signer' : 'Not accepted'}`, L + 12, ay + 55);
+  doc.text(`Device / browser: ${(signature.userAgent || '—').slice(0, 95)}`, L + 300, ay + 22, { width: R - L - 312 });
+  doc.y = ay + 80;
 
   // Footer page numbers
   const range = doc.bufferedPageRange();

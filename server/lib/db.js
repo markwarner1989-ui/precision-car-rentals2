@@ -124,8 +124,51 @@ db.exec(`
     agreement_signed_at TEXT,
     agreement_file     TEXT,
 
+    -- e-signature audit trail (chargeback / dispute defense)
+    sign_ip            TEXT,
+    sign_user_agent    TEXT,
+    terms_accepted     INTEGER DEFAULT 0,
+
+    -- add-ons chosen (JSON array of {code,label,price,qty})
+    addons             TEXT,
+    addons_total       REAL DEFAULT 0,
+
+    -- lifecycle: booking (upcoming) -> rental (active) -> completed; or cancelled
+    lifecycle          TEXT DEFAULT 'booking',  -- booking|active|completed|cancelled
+
+    -- check-in / check-out (JSON: {miles,fuel,photos:[],at})
+    checkin            TEXT,
+    checkout           TEXT,
+
+    -- refunds (JSON array of {amount,type,ref,at})
+    refunds            TEXT,
+    refunded_total     REAL DEFAULT 0,
+
     created_at         TEXT DEFAULT (datetime('now'))
   );
+
+  -- Add-on catalog (prepaid fuel, child seat, etc.)
+  CREATE TABLE IF NOT EXISTS addons (
+    id          TEXT PRIMARY KEY,
+    code        TEXT UNIQUE NOT NULL,
+    label       TEXT NOT NULL,
+    description TEXT,
+    price       REAL NOT NULL DEFAULT 0,
+    per         TEXT DEFAULT 'rental',   -- rental | day
+    active      INTEGER DEFAULT 1,
+    sort_order  INTEGER DEFAULT 0
+  );
 `);
+
+// ── Safe migrations (for any persisted DB that predates new columns) ──
+function ensureColumn(table, col, decl) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!cols.some((c) => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${decl}`);
+}
+for (const [c, d] of [
+  ['sign_ip', 'TEXT'], ['sign_user_agent', 'TEXT'], ['terms_accepted', 'INTEGER DEFAULT 0'],
+  ['addons', 'TEXT'], ['addons_total', 'REAL DEFAULT 0'], ['lifecycle', "TEXT DEFAULT 'booking'"],
+  ['checkin', 'TEXT'], ['checkout', 'TEXT'], ['refunds', 'TEXT'], ['refunded_total', 'REAL DEFAULT 0'],
+]) ensureColumn('bookings', c, d);
 
 export default db;
