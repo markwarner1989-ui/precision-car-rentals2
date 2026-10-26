@@ -56,6 +56,8 @@ export default function Agreement() {
           <dt>Coverage</dt><dd>{data.terms.coverage}</dd>
           <dt>Deposit paid</dt><dd>{money(data.terms.deposit)}</dd>
           <dt>Due at pickup</dt><dd>{money(data.terms.due_at_pickup)}</dd>
+          {data.terms.odo_start != null && <><dt>Starting odometer</dt><dd>{Number(data.terms.odo_start).toLocaleString()} miles</dd></>}
+          {data.terms.miles_allowed != null && <><dt>Mileage included</dt><dd>{Number(data.terms.miles_allowed).toLocaleString()} miles</dd></>}
         </dl>
 
         <h3 style={{ fontFamily: 'var(--display)', color: 'var(--teal)' }}>Initial each term</h3>
