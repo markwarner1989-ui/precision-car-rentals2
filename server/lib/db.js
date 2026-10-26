@@ -140,6 +140,14 @@ db.exec(`
     checkin            TEXT,
     checkout           TEXT,
 
+    -- odometer workflow (no photos): start recorded at pickup, end at return
+    odo_start          INTEGER,
+    odo_end            INTEGER,
+    odo_started_at     TEXT,
+    odo_ended_at       TEXT,
+    miles_allowed      INTEGER,   -- total allowance for the rental (per-day allowance * days)
+    proof_payment_file TEXT,      -- recent insurance payment proof (own-insurance renters)
+
     -- refunds (JSON array of {amount,type,ref,at})
     refunds            TEXT,
     refunded_total     REAL DEFAULT 0,
@@ -169,6 +177,31 @@ for (const [c, d] of [
   ['sign_ip', 'TEXT'], ['sign_user_agent', 'TEXT'], ['terms_accepted', 'INTEGER DEFAULT 0'],
   ['addons', 'TEXT'], ['addons_total', 'REAL DEFAULT 0'], ['lifecycle', "TEXT DEFAULT 'booking'"],
   ['checkin', 'TEXT'], ['checkout', 'TEXT'], ['refunds', 'TEXT'], ['refunded_total', 'REAL DEFAULT 0'],
+  ['odo_start', 'INTEGER'], ['odo_end', 'INTEGER'], ['odo_started_at', 'TEXT'], ['odo_ended_at', 'TEXT'],
+  ['miles_allowed', 'INTEGER'], ['proof_payment_file', 'TEXT'],
 ]) ensureColumn('bookings', c, d);
+
+// Settings table: mileage policy + multi-day discount tiers (admin-editable).
+db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`);
+function settingDefault(key, val) {
+  const row = db.prepare(`SELECT value FROM settings WHERE key=?`).get(key);
+  if (!row) db.prepare(`INSERT INTO settings (key,value) VALUES (?,?)`).run(key, val);
+}
+settingDefault('miles_per_day', '150');
+settingDefault('overage_per_mile', '0.58');
+// Discount tiers: apply a % off the rental subtotal when the rental is at least N days.
+// Highest matching min_days wins. Stored as JSON.
+settingDefault('discount_tiers', JSON.stringify([
+  { min_days: 7, percent: 10 },
+  { min_days: 28, percent: 20 },
+]));
+
+export function getSetting(key, fallback = null) {
+  const row = db.prepare(`SELECT value FROM settings WHERE key=?`).get(key);
+  return row ? row.value : fallback;
+}
+export function setSetting(key, value) {
+  db.prepare(`INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`).run(key, String(value));
+}
 
 export default db;

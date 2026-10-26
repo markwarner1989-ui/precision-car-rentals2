@@ -363,10 +363,12 @@ function SummaryCard({ selectedCat, quote, pickup, ret, pickupLoc, pickupLocatio
             const surLabel = quote.hasOwn === false ? 'Insurance package' : 'Collision';
             return (
               <div style={{ marginTop: 14 }}>
-                <div className="sum-row"><span>Rental · {quote.days}d × {money(quote.dailyRate)}</span><span>{money(quote.rentalSubtotal)}</span></div>
+                <div className="sum-row"><span>Rental · {quote.days}d × {money(quote.dailyRate)}</span><span>{money(quote.grossRental != null ? quote.grossRental : quote.rentalSubtotal)}</span></div>
+                {quote.discountAmount > 0 && <div className="sum-row" style={{ color: 'var(--teal)' }}><span>{quote.days}-day discount ({quote.discountPercent}% off)</span><span>−{money(quote.discountAmount)}</span></div>}
                 {quote.surchargeSubtotal > 0 && !toDeposit && <div className="sum-row"><span>{surLabel} · {quote.days}d</span><span>{money(quote.surchargeSubtotal)}</span></div>}
                 {addonLines.map((a, i) => <div className="sum-row" key={i}><span>{a.label}</span><span>{money(a.total)}</span></div>)}
                 <div className="sum-row total"><span>Due at pickup</span><strong>{money(quote.dueAtPickup + addonsTotal)}</strong></div>
+                {quote.milesAllowed != null && <div className="sum-pickup" style={{ marginTop: 8, fontSize: 12 }}><span>Mileage included</span><span>{quote.milesAllowed.toLocaleString()} mi ({quote.milesPerDay}/day)</span></div>}
                 <div className="sum-due-now">
                   <div className="lbl">Due now — deposit</div>
                   <div className="amt">{money(quote.deposit)}</div>

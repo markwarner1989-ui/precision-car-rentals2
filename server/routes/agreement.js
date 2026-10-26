@@ -4,6 +4,7 @@ import fs from 'fs';
 import db from '../lib/db.js';
 import { generateAgreementPDF, INITIAL_CLAUSES, AGREEMENTS_DIR, TERMS } from '../lib/agreement.js';
 import { sendEmail } from '../lib/email.js';
+import { getSetting } from '../lib/db.js';
 
 const router = express.Router();
 
@@ -21,9 +22,16 @@ router.get('/:token', (req, res) => {
       pickup_at: b.pickup_at, return_at: b.return_at, pickup_location: b.pickup_location,
       delivery_address: b.delivery_address, coverage: b.coverage_label,
       deposit: b.deposit, due_at_pickup: b.due_at_pickup, category: b.category_name,
+      odo_start: b.odo_start, miles_allowed: b.miles_allowed,
     },
     clauses: INITIAL_CLAUSES,
-    termsAndConditions: TERMS.map(([title, body]) => ({ title, body: body.replace(/\{company\}/g, process.env.BUSINESS_NAME || 'Precision Car Rentals') })),
+    termsAndConditions: TERMS.map(([title, body]) => ({
+      title,
+      body: body
+        .replace(/\{company\}/g, process.env.BUSINESS_NAME || 'Precision Car Rentals')
+        .replace(/\{miles_per_day\}/g, String(Number(getSetting('miles_per_day', '150'))))
+        .replace(/\{overage_per_mile\}/g, Number(getSetting('overage_per_mile', '0.58')).toFixed(2)),
+    })),
     signed_at: b.agreement_signed_at,
   });
 });
@@ -47,7 +55,9 @@ router.post('/:token/sign', async (req, res) => {
 
   const car = b.assigned_car_id ? db.prepare(`SELECT c.*, cat.name AS category_name FROM cars c JOIN categories cat ON cat.id=c.category_id WHERE c.id = ?`).get(b.assigned_car_id) : null;
   const signedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  const filename = await generateAgreementPDF(b, car, { initials, fullName, signedAt, ip, userAgent, termsAccepted: true });
+  const milesPerDay = Number(getSetting('miles_per_day', '150'));
+  const overagePerMile = Number(getSetting('overage_per_mile', '0.58'));
+  const filename = await generateAgreementPDF(b, car, { initials, fullName, signedAt, ip, userAgent, termsAccepted: true, milesPerDay, overagePerMile });
 
   db.prepare(`UPDATE bookings SET agreement_status='signed', agreement_signed_at=?, agreement_file=?, sign_ip=?, sign_user_agent=?, terms_accepted=1 WHERE id=?`)
     .run(signedAt, filename, ip, userAgent, b.id);

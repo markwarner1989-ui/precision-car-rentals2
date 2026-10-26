@@ -116,7 +116,7 @@ function BookingModal({ booking: b, token, onClose, onChanged }) {
   async function approve() {
     if (!carId) { alert('Assign a specific vehicle first.'); return; }
     setBusy(true);
-    try { const r = await api.adminPost(`/bookings/${b.id}/approve`, token, { assignedCarId: carId, notes }); setSignUrl(r.signUrl); setTimeout(onChanged, 1500); }
+    try { await api.adminPost(`/bookings/${b.id}/approve`, token, { assignedCarId: carId, notes }); alert('Reservation confirmed. The customer gets a confirmation email now — the rental agreement is sent on pickup day once you record the starting odometer.'); onChanged(); }
     catch (e) { alert(e.message); } finally { setBusy(false); }
   }
   async function decline() { setBusy(true); try { await api.adminPost(`/bookings/${b.id}/decline`, token, { notes }); onChanged(); } catch (e) { alert(e.message); } finally { setBusy(false); } }
@@ -135,18 +135,25 @@ function BookingModal({ booking: b, token, onClose, onChanged }) {
     catch (e) { alert(e.message); } finally { setBusy(false); }
   }
 
-  // check-in / check-out
-  const [ciMiles, setCiMiles] = useState(b.checkin_data?.miles ?? ''); const [ciFuel, setCiFuel] = useState(b.checkin_data?.fuel ?? 'Full'); const [ciFiles, setCiFiles] = useState([]);
-  const [coMiles, setCoMiles] = useState(b.checkout_data?.miles ?? ''); const [coFuel, setCoFuel] = useState(b.checkout_data?.fuel ?? 'Full'); const [coFiles, setCoFiles] = useState([]);
-  async function inspect(kind, miles, fuel, files) {
+  // odometer workflow (numbers only — no photos)
+  const [odoStart, setOdoStart] = useState(b.odo_start ?? '');
+  const [odoEnd, setOdoEnd] = useState(b.odo_end ?? '');
+  async function startOdometer() {
+    if (odoStart === '') { alert('Enter the starting odometer reading.'); return; }
     setBusy(true);
     try {
-      const fd = new FormData();
-      if (miles !== '') fd.append('miles', miles);
-      fd.append('fuel', fuel);
-      Array.from(files || []).forEach((f) => fd.append('photos', f));
-      const r = await api.adminUpload(`/bookings/${b.id}/${kind}`, token, fd);
-      alert(`${kind === 'checkin' ? 'Check-in' : 'Check-out'} saved.${r.milesDriven != null ? ` Miles driven: ${r.milesDriven}` : ''}`);
+      const r = await api.adminPost(`/bookings/${b.id}/odometer/start`, token, { odoStart: Number(odoStart) });
+      alert(`Starting odometer recorded (${Number(odoStart).toLocaleString()} mi). Agreement sent to the customer. Mileage included: ${r.milesAllowed.toLocaleString()} mi.`);
+      onChanged();
+    } catch (e) { alert(e.message); } finally { setBusy(false); }
+  }
+  async function endOdometer() {
+    if (odoEnd === '') { alert('Enter the ending odometer reading.'); return; }
+    setBusy(true);
+    try {
+      const r = await api.adminPost(`/bookings/${b.id}/odometer/end`, token, { odoEnd: Number(odoEnd) });
+      const over = r.overMiles > 0 ? `\nOver the ${r.milesAllowed.toLocaleString()}-mile allowance by ${r.overMiles.toLocaleString()} mi → overage charge $${r.overageCharge.toFixed(2)} ($${r.overagePerMile}/mi).` : `\nWithin the ${r.milesAllowed.toLocaleString()}-mile allowance — no overage.`;
+      alert(`Rental completed. Miles driven: ${r.milesDriven.toLocaleString()}.${over}`);
       onChanged();
     } catch (e) { alert(e.message); } finally { setBusy(false); }
   }
@@ -196,10 +203,10 @@ function BookingModal({ booking: b, token, onClose, onChanged }) {
               {!cars.length && <div className="note note-warn" style={{ marginTop: 10 }}>No cars free for these dates. Add cars or clear a block first.</div>}
             </div>
             <div className="field"><label>Notes</label><input className="input" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Verification notes" /></div>
-            {signUrl && <div className="note note-info">Approved! Agreement link sent to customer: <br /><a href={signUrl} target="_blank" rel="noreferrer">{signUrl}</a></div>}
+            <div className="note note-info" style={{ fontSize: 13 }}>Approving confirms the reservation and emails the customer. The rental agreement is sent on <strong>pickup day</strong>, after you record the starting odometer below.</div>
             <div className="row-between">
               <button className="btn btn-ghost" disabled={busy} onClick={decline}>Decline</button>
-              <button className="btn btn-teal" disabled={busy} onClick={approve}>Approve & send agreement</button>
+              <button className="btn btn-teal" disabled={busy} onClick={approve}>Approve & confirm</button>
             </div>
           </>
         )}
@@ -217,12 +224,43 @@ function BookingModal({ booking: b, token, onClose, onChanged }) {
 
             {b.status === 'approved' && b.lifecycle !== 'cancelled' && (
               <>
+                {/* Pickup-day & return odometer workflow — drives the whole rental */}
                 <div className="field" style={{ marginTop: 14 }}>
-                  <label><strong>Manage rental</strong></label>
-                  <div className="tabs" style={{ marginTop: 6 }}>
-                    {b.lifecycle === 'booking' && <button className="btn btn-teal btn-sm" disabled={busy} onClick={startRental}>Start rental (check-out car)</button>}
-                    {b.lifecycle === 'active' && <button className="btn btn-teal btn-sm" disabled={busy} onClick={completeRental}>Complete rental (return)</button>}
-                    <button className="btn btn-ghost btn-sm" disabled={busy} onClick={cancelBooking}>Cancel</button>
+                  <label><strong>Rental workflow</strong></label>
+
+                  {b.lifecycle === 'booking' && (
+                    <div className="note note-info" style={{ marginTop: 6 }}>
+                      <strong>On pickup day:</strong> enter the vehicle's starting odometer. This sends the rental agreement to the customer (with the starting mileage) and starts the rental.
+                      <div className="grid-2" style={{ marginTop: 10 }}>
+                        <div className="field" style={{ margin: 0 }}><label>Starting odometer (miles)</label><input className="input" type="number" min="0" value={odoStart} onChange={(e) => setOdoStart(e.target.value)} placeholder="e.g. 50000" /></div>
+                        <div className="field" style={{ margin: 0, alignSelf: 'end' }}><button className="btn btn-teal" disabled={busy} onClick={startOdometer}>Record start & send agreement</button></div>
+                      </div>
+                    </div>
+                  )}
+
+                  {b.lifecycle === 'active' && (
+                    <div className="note note-info" style={{ marginTop: 6 }}>
+                      {b.agreement_status !== 'signed' && <div className="note note-warn" style={{ marginBottom: 8 }}>Agreement not signed yet — the sign link was emailed to the customer.</div>}
+                      <div>Started at <strong>{Number(b.odo_start).toLocaleString()} mi</strong> · {b.miles_allowed?.toLocaleString()} mi included.</div>
+                      <strong>On return:</strong> enter the ending odometer to close the rental and calculate any mileage overage.
+                      <div className="grid-2" style={{ marginTop: 10 }}>
+                        <div className="field" style={{ margin: 0 }}><label>Ending odometer (miles)</label><input className="input" type="number" min="0" value={odoEnd} onChange={(e) => setOdoEnd(e.target.value)} placeholder="e.g. 50600" /></div>
+                        <div className="field" style={{ margin: 0, alignSelf: 'end' }}><button className="btn btn-teal" disabled={busy} onClick={endOdometer}>Record return & complete</button></div>
+                      </div>
+                    </div>
+                  )}
+
+                  {b.lifecycle === 'completed' && b.mileage && (
+                    <div className="note note-info" style={{ marginTop: 6 }}>
+                      <strong>Completed.</strong> {Number(b.mileage.start).toLocaleString()} → {Number(b.mileage.end).toLocaleString()} mi · drove <strong>{Number(b.mileage.driven).toLocaleString()} mi</strong> of {Number(b.mileage.allowed).toLocaleString()} allowed.
+                      {b.mileage.overMiles > 0
+                        ? <div style={{ marginTop: 4, color: '#9a3412' }}><strong>{b.mileage.overMiles.toLocaleString()} mi over → ${b.mileage.overageCharge.toFixed(2)} overage</strong> (${b.mileage.overagePerMile}/mi).</div>
+                        : <div style={{ marginTop: 4, color: 'var(--teal)' }}>Within allowance — no overage.</div>}
+                    </div>
+                  )}
+
+                  <div className="tabs" style={{ marginTop: 10 }}>
+                    <button className="btn btn-ghost btn-sm" disabled={busy} onClick={cancelBooking}>Cancel booking</button>
                   </div>
                 </div>
 
@@ -250,34 +288,6 @@ function BookingModal({ booking: b, token, onClose, onChanged }) {
                   )}
                 </details>
 
-                <details style={{ marginTop: 10 }} open={b.lifecycle === 'booking' || b.lifecycle === 'active'}>
-                  <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>Check-in / Check-out (photos + odometer + fuel)</summary>
-
-                  <div className="note note-info" style={{ marginTop: 10, fontSize: 13 }}>
-                    <strong>Check-in (before handing over the car)</strong>
-                    {b.checkin_data && <span> — recorded {b.checkin_data.at}: {b.checkin_data.miles} mi, fuel {b.checkin_data.fuel}, {(b.checkin_data.photos || []).length} photo(s)</span>}
-                  </div>
-                  <div className="grid-2">
-                    <div className="field"><label>Odometer (miles)</label><input className="input" type="number" value={ciMiles} onChange={(e) => setCiMiles(e.target.value)} /></div>
-                    <div className="field"><label>Fuel level</label><select className="select" value={ciFuel} onChange={(e) => setCiFuel(e.target.value)}><option>Full</option><option>3/4</option><option>1/2</option><option>1/4</option><option>Empty</option></select></div>
-                  </div>
-                  <div className="field"><label>Car photos</label><input type="file" accept="image/*" multiple onChange={(e) => setCiFiles(e.target.files)} /></div>
-                  <button className="btn btn-teal btn-sm" disabled={busy} onClick={() => inspect('checkin', ciMiles, ciFuel, ciFiles)}>Save check-in</button>
-                  {b.checkin_data?.photos?.length > 0 && <div className="doc-thumbs" style={{ marginTop: 8 }}>{b.checkin_data.photos.map((u, i) => <a key={i} href={u} target="_blank" rel="noreferrer">Photo {i + 1} ↗</a>)}</div>}
-
-                  <div className="note note-info" style={{ marginTop: 14, fontSize: 13 }}>
-                    <strong>Check-out (when the car is returned)</strong>
-                    {b.checkout_data && <span> — recorded {b.checkout_data.at}: {b.checkout_data.miles} mi, fuel {b.checkout_data.fuel}, {(b.checkout_data.photos || []).length} photo(s)</span>}
-                    {b.checkin_data?.miles != null && b.checkout_data?.miles != null && <div><strong>Miles driven: {b.checkout_data.miles - b.checkin_data.miles}</strong></div>}
-                  </div>
-                  <div className="grid-2">
-                    <div className="field"><label>Odometer (miles)</label><input className="input" type="number" value={coMiles} onChange={(e) => setCoMiles(e.target.value)} /></div>
-                    <div className="field"><label>Fuel level</label><select className="select" value={coFuel} onChange={(e) => setCoFuel(e.target.value)}><option>Full</option><option>3/4</option><option>1/2</option><option>1/4</option><option>Empty</option></select></div>
-                  </div>
-                  <div className="field"><label>Car photos</label><input type="file" accept="image/*" multiple onChange={(e) => setCoFiles(e.target.files)} /></div>
-                  <button className="btn btn-teal btn-sm" disabled={busy} onClick={() => inspect('checkout', coMiles, coFuel, coFiles)}>Save check-out</button>
-                  {b.checkout_data?.photos?.length > 0 && <div className="doc-thumbs" style={{ marginTop: 8 }}>{b.checkout_data.photos.map((u, i) => <a key={i} href={u} target="_blank" rel="noreferrer">Photo {i + 1} ↗</a>)}</div>}
-                </details>
               </>
             )}
 
@@ -554,12 +564,29 @@ function PricingManager({ token }) {
   const [ins, setIns] = useState([]);
   const [saving, setSaving] = useState('');
   const [msg, setMsg] = useState('');
+  const [settings, setSettings] = useState(null);
 
   const load = () => {
     api.adminGet('/categories', token).then((d) => setCats(d.categories)).catch(() => {});
     api.adminGet('/insurance', token).then((d) => setIns(d.insurance)).catch(() => {});
+    api.adminGet('/settings', token).then((d) => setSettings({ milesPerDay: d.milesPerDay, overagePerMile: d.overagePerMile, discountTiers: d.discountTiers || [] })).catch(() => {});
   };
   useEffect(() => { load(); }, []);
+
+  const setTier = (i, field, val) => setSettings({ ...settings, discountTiers: settings.discountTiers.map((t, j) => j === i ? { ...t, [field]: val } : t) });
+  const addTier = () => setSettings({ ...settings, discountTiers: [...settings.discountTiers, { min_days: '', percent: '' }] });
+  const removeTier = (i) => setSettings({ ...settings, discountTiers: settings.discountTiers.filter((_, j) => j !== i) });
+  async function saveSettings() {
+    setSaving('settings'); setMsg('');
+    try {
+      await api.adminPatch('/settings', token, {
+        milesPerDay: Number(settings.milesPerDay),
+        overagePerMile: Number(settings.overagePerMile),
+        discountTiers: settings.discountTiers.filter((t) => t.min_days !== '' && t.percent !== '').map((t) => ({ min_days: Number(t.min_days), percent: Number(t.percent) })),
+      });
+      setMsg('Mileage & discount settings saved'); load();
+    } catch (e) { setMsg(e.message); } finally { setSaving(''); }
+  }
 
   const setCat = (id, field, val) => setCats(cats.map((c) => c.id === id ? { ...c, [field]: val } : c));
   const setInsVal = (code, val) => setIns(ins.map((i) => i.code === code ? { ...i, surcharge_daily: val } : i));
@@ -580,15 +607,15 @@ function PricingManager({ token }) {
       {msg && <div className="note note-info">{msg}</div>}
       <div className="panel panel-pad" style={{ marginBottom: 24 }}>
         <h2 className="section-title" style={{ fontSize: 20 }}>Vehicle class pricing</h2>
-        <p className="section-sub">Set each class's daily rate and the fixed deposit customers pay now. Changes take effect immediately on the booking site.</p>
+        <p className="section-sub">Set each class's daily rate and the fixed deposit customers pay now. Cents are allowed (e.g. 67.11). Changes take effect immediately on the booking site.</p>
         <table className="bk-table">
           <thead><tr><th>Class</th><th>Daily rate ($)</th><th>Deposit ($)</th><th></th></tr></thead>
           <tbody>
             {cats.map((c) => (
               <tr key={c.id}>
                 <td><strong>{c.name}</strong></td>
-                <td><input className="input" type="number" min="0" step="1" value={c.daily_rate} onChange={(e) => setCat(c.id, 'daily_rate', e.target.value)} style={{ maxWidth: 120 }} /></td>
-                <td><input className="input" type="number" min="0" step="1" value={c.deposit} onChange={(e) => setCat(c.id, 'deposit', e.target.value)} style={{ maxWidth: 120 }} /></td>
+                <td><input className="input" type="number" min="0" step="0.01" value={c.daily_rate} onChange={(e) => setCat(c.id, 'daily_rate', e.target.value)} style={{ maxWidth: 120 }} /></td>
+                <td><input className="input" type="number" min="0" step="0.01" value={c.deposit} onChange={(e) => setCat(c.id, 'deposit', e.target.value)} style={{ maxWidth: 120 }} /></td>
                 <td><button className="btn btn-teal btn-sm" disabled={saving === c.id} onClick={() => saveCat(c)}>{saving === c.id ? 'Saving…' : 'Save'}</button></td>
               </tr>
             ))}
@@ -605,12 +632,40 @@ function PricingManager({ token }) {
             {ins.map((i) => (
               <tr key={i.code}>
                 <td><strong>{i.label}</strong> {i.code === 'full' && <span style={{ color: 'var(--ink-soft)' }}>(no charge)</span>}</td>
-                <td><input className="input" type="number" min="0" step="1" value={i.surcharge_daily} onChange={(e) => setInsVal(i.code, e.target.value)} style={{ maxWidth: 120 }} /></td>
+                <td><input className="input" type="number" min="0" step="0.01" value={i.surcharge_daily} onChange={(e) => setInsVal(i.code, e.target.value)} style={{ maxWidth: 120 }} /></td>
                 <td><button className="btn btn-teal btn-sm" disabled={saving === i.code} onClick={() => saveIns(i)}>{saving === i.code ? 'Saving…' : 'Save'}</button></td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+
+      <div className="panel panel-pad" style={{ marginTop: 24 }}>
+        <h2 className="section-title" style={{ fontSize: 20 }}>Mileage & multi-day discounts</h2>
+        <p className="section-sub">Mileage allowance and overage rate print on every rental agreement. Discount tiers apply a % off the rental subtotal once a booking reaches the given number of days (the highest matching tier wins).</p>
+        {!settings ? <p className="section-sub">Loading…</p> : (
+          <>
+            <div className="grid-2">
+              <div className="field"><label>Miles included per day</label><input className="input" type="number" min="1" step="1" value={settings.milesPerDay} onChange={(e) => setSettings({ ...settings, milesPerDay: e.target.value })} /></div>
+              <div className="field"><label>Overage charge per mile ($)</label><input className="input" type="number" min="0" step="0.01" value={settings.overagePerMile} onChange={(e) => setSettings({ ...settings, overagePerMile: e.target.value })} /></div>
+            </div>
+            <label style={{ fontWeight: 600, fontSize: 14, display: 'block', margin: '8px 0' }}>Discount tiers</label>
+            <table className="bk-table">
+              <thead><tr><th>If rental is at least (days)</th><th>Discount (%)</th><th></th></tr></thead>
+              <tbody>
+                {settings.discountTiers.map((t, i) => (
+                  <tr key={i}>
+                    <td><input className="input" type="number" min="1" step="1" value={t.min_days} onChange={(e) => setTier(i, 'min_days', e.target.value)} style={{ maxWidth: 140 }} /></td>
+                    <td><input className="input" type="number" min="0" max="100" step="1" value={t.percent} onChange={(e) => setTier(i, 'percent', e.target.value)} style={{ maxWidth: 120 }} /></td>
+                    <td><button className="btn btn-ghost btn-sm" onClick={() => removeTier(i)}>Remove</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <button className="btn btn-ghost btn-sm" style={{ marginRight: 8 }} onClick={addTier}>+ Add tier</button>
+            <button className="btn btn-teal btn-sm" disabled={saving === 'settings'} onClick={saveSettings}>{saving === 'settings' ? 'Saving…' : 'Save mileage & discounts'}</button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -717,6 +772,8 @@ function Availability({ token }) {
   const [carBlocks, setCarBlocks] = useState([]);
   const [cf, setCf] = useState({ categoryId: '', startDate: '', endDate: '', reason: '' });
   const [rf, setRf] = useState({ carId: '', startDate: '', endDate: '', reason: '' });
+  const [af, setAf] = useState({ startDate: '', endDate: '', reason: 'Business closed' });
+  const [allMsg, setAllMsg] = useState('');
 
   const load = () => {
     api.adminGet('/categories', token).then((d) => setCats(d.categories)).catch(() => {});
@@ -727,12 +784,28 @@ function Availability({ token }) {
   useEffect(() => { load(); }, []);
 
   async function addCat() { if (!cf.categoryId || !cf.startDate || !cf.endDate) return; await api.adminPost('/blocks', token, cf); setCf({ categoryId: '', startDate: '', endDate: '', reason: '' }); load(); }
+  async function blockAll() {
+    if (!af.startDate || !af.endDate) { setAllMsg('Pick a start and end date.'); return; }
+    try { const r = await api.adminPost('/blocks/all', token, af); setAllMsg(`Blocked all ${r.blocked} classes for ${af.startDate}${af.endDate !== af.startDate ? ' → ' + af.endDate : ''}.`); setAf({ startDate: '', endDate: '', reason: 'Business closed' }); load(); }
+    catch (e) { setAllMsg(e.message); }
+  }
   async function addCar() { if (!rf.carId || !rf.startDate || !rf.endDate) return; await api.adminPost('/car-blocks', token, rf); setRf({ carId: '', startDate: '', endDate: '', reason: '' }); load(); }
   async function delCat(id) { await api.adminDelete(`/blocks/${id}`, token); load(); }
   async function delCar(id) { await api.adminDelete(`/car-blocks/${id}`, token); load(); }
 
   return (
     <>
+      <div className="panel panel-pad" style={{ marginBottom: 24, borderTop: '3px solid var(--amber, #e08a2b)' }}>
+        <h2 className="section-title" style={{ fontSize: 20 }}>Business closed (block everything)</h2>
+        <p className="section-sub">Close the whole business for a date range — e.g. a holiday like Christmas. No one can book or pick up online on those days (blocks every class at once).</p>
+        {allMsg && <div className="note note-info">{allMsg}</div>}
+        <div className="grid-3" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+          <div className="field"><label>From</label><input className="input" type="date" value={af.startDate} onChange={(e) => setAf({ ...af, startDate: e.target.value, endDate: af.endDate || e.target.value })} /></div>
+          <div className="field"><label>To</label><input className="input" type="date" value={af.endDate} onChange={(e) => setAf({ ...af, endDate: e.target.value })} /></div>
+          <div className="field"><label>Reason</label><input className="input" value={af.reason} onChange={(e) => setAf({ ...af, reason: e.target.value })} /></div>
+        </div>
+        <button className="btn btn-teal" onClick={blockAll}>Close business for these dates</button>
+      </div>
       <div className="split">
         <div className="panel panel-pad">
           <h2 className="section-title" style={{ fontSize: 20 }}>Block a whole class</h2>

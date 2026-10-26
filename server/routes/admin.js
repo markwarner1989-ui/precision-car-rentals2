@@ -5,8 +5,9 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { nanoid } from 'nanoid';
 import db from '../lib/db.js';
+import { getSetting, setSetting } from '../lib/db.js';
 import { signAdmin, requireAdmin } from '../lib/auth.js';
-import { availableCarsInCategory, rentalDays } from '../lib/pricing.js';
+import { availableCarsInCategory, rentalDays, quote, discountForDays } from '../lib/pricing.js';
 import { sendEmail } from '../lib/email.js';
 import { refund } from '../lib/payments.js';
 
@@ -54,28 +55,34 @@ router.get('/bookings/:id/available-cars', (req, res) => {
   res.json({ cars: availableCarsInCategory(b.category_id, b.pickup_at, b.return_at) });
 });
 
-// Approve: assign a specific car, generate agreement token, email the sign link.
+// Approve: assign a specific car and confirm the reservation.
+// IMPORTANT (client policy, Oct 15): the rental agreement is NOT sent at approval.
+// The customer only receives a confirmation. The agreement is generated and sent on
+// the PICKUP DAY, after the admin records the starting odometer (see /odometer/start),
+// because the starting mileage must appear in the binding contract.
 router.post('/bookings/:id/approve', async (req, res) => {
   const { assignedCarId, notes } = req.body;
   const b = db.prepare(`SELECT * FROM bookings WHERE id = ?`).get(req.params.id);
   if (!b) return res.status(404).json({ error: 'Not found' });
   if (!assignedCarId) return res.status(400).json({ error: 'Please assign a specific vehicle before approving.' });
-  const car = db.prepare(`SELECT * FROM cars WHERE id = ?`).get(assignedCarId);
+  const car = db.prepare(`SELECT c.*, cat.name AS category_name FROM cars c JOIN categories cat ON cat.id=c.category_id WHERE c.id = ?`).get(assignedCarId);
   if (!car) return res.status(404).json({ error: 'Car not found' });
 
-  const token = nanoid(24);
-  db.prepare(`UPDATE bookings SET status='approved', assigned_car_id=?, admin_notes=?, agreement_status='sent', agreement_token=? WHERE id=?`)
-    .run(assignedCarId, notes || null, token, b.id);
+  db.prepare(`UPDATE bookings SET status='approved', assigned_car_id=?, admin_notes=?, agreement_status='none' WHERE id=?`)
+    .run(assignedCarId, notes || null, b.id);
 
-  const base = process.env.PUBLIC_URL || 'http://localhost:4000';
-  const signUrl = `${base}/sign/${token}`;
+  // Confirmation only — tells them the class + an example or two, not the exact vehicle,
+  // and that the signed agreement comes on pickup day.
+  const sameClass = db.prepare(`SELECT make, model FROM cars WHERE category_id=? AND active=1 LIMIT 3`).all(b.category_id)
+    .map((c) => `${c.make} ${c.model}`);
+  const examples = sameClass.length ? sameClass.join(', ') : (car.category_name + ' class');
   await sendEmail({
     to: b.email,
-    subject: `Reservation approved — please sign your rental agreement (${b.reference})`,
-    text: `Good news! Your reservation ${b.reference} is approved.\n\nYour vehicle: ${car.year} ${car.make} ${car.model} (${car.color})\n\nPlease review and sign your rental agreement here:\n${signUrl}\n\nA copy will be emailed to you once signed.`,
+    subject: `Reservation confirmed — ${b.reference}`,
+    text: `Good news! Your reservation ${b.reference} is confirmed and your payment has been received.\n\nVehicle class: ${car.category_name} (similar to ${examples})\nPickup: ${b.pickup_at.replace('T', ' ')}\nReturn: ${b.return_at.replace('T', ' ')}\n\nYour rental agreement will be sent to you on the day you pick up the car, once we record the vehicle's starting mileage. A valid driver's license and a debit/credit card in your name are required at pickup.\n\nThank you for choosing Precision Car Rentals.`,
   });
 
-  res.json({ ok: true, signUrl });
+  res.json({ ok: true });
 });
 
 router.post('/bookings/:id/decline', (req, res) => {
@@ -283,40 +290,60 @@ router.post('/bookings/:id/refund', async (req, res) => {
   res.json({ ok: true, refundedTotal, ref: result.ref });
 });
 
-/* ── check-in / check-out (photos + odometer miles + fuel) ── */
-function handleInspection(kind) {
-  return (req, res) => {
-    const b = db.prepare(`SELECT * FROM bookings WHERE id=?`).get(req.params.id);
-    if (!b) return res.status(404).json({ error: 'Not found' });
-    const miles = req.body.miles != null && req.body.miles !== '' ? Number(req.body.miles) : null;
-    const fuel = req.body.fuel != null ? req.body.fuel : null; // e.g. "Full", "3/4", "1/2"
-    const photos = (req.files || []).map((f) => `/uploads/${f.filename}`);
-    // merge with any existing photos for this inspection
-    let existing = {};
-    try { existing = JSON.parse((kind === 'checkin' ? b.checkin : b.checkout) || '{}') || {}; } catch { existing = {}; }
-    const data = {
-      miles: miles != null ? miles : existing.miles ?? null,
-      fuel: fuel != null ? fuel : existing.fuel ?? null,
-      photos: [...(existing.photos || []), ...photos],
-      at: new Date().toISOString().slice(0, 19).replace('T', ' '),
-    };
-    const col = kind === 'checkin' ? 'checkin' : 'checkout';
-    db.prepare(`UPDATE bookings SET ${col}=? WHERE id=?`).run(JSON.stringify(data), b.id);
-    // auto-advance lifecycle: check-in starts the rental, check-out completes it
-    if (kind === 'checkin' && b.lifecycle === 'booking') db.prepare(`UPDATE bookings SET lifecycle='active' WHERE id=?`).run(b.id);
-    if (kind === 'checkout' && b.lifecycle === 'active') db.prepare(`UPDATE bookings SET lifecycle='completed' WHERE id=?`).run(b.id);
+/* ── Odometer workflow (numbers only, no photos) ──
+   START (pickup day): record starting odometer, GENERATE + SEND the rental agreement
+   (which prints the starting mileage and the mileage policy), move to active.
+   END   (return): record ending odometer, compute miles driven vs allowance + overage,
+   move to completed. */
+router.post('/bookings/:id/odometer/start', async (req, res) => {
+  const b = db.prepare(`SELECT * FROM bookings WHERE id=?`).get(req.params.id);
+  if (!b) return res.status(404).json({ error: 'Not found' });
+  if (b.status !== 'approved') return res.status(400).json({ error: 'Approve and assign a vehicle before starting the rental.' });
+  if (!b.assigned_car_id) return res.status(400).json({ error: 'Assign a specific vehicle first.' });
+  const start = Number(req.body.odoStart);
+  if (!Number.isFinite(start) || start < 0) return res.status(400).json({ error: 'Enter a valid starting odometer reading.' });
 
-    // compute miles driven if both present
-    let milesDriven = null;
-    const ci = kind === 'checkin' ? data : (() => { try { return JSON.parse(b.checkin || '{}'); } catch { return {}; } })();
-    const co = kind === 'checkout' ? data : (() => { try { return JSON.parse(b.checkout || '{}'); } catch { return {}; } })();
-    if (ci?.miles != null && co?.miles != null) milesDriven = co.miles - ci.miles;
+  const perDay = Number(getSetting('miles_per_day', '150'));
+  const milesAllowed = perDay * b.days;
+  const token = b.agreement_token || nanoid(24);
+  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  db.prepare(`UPDATE bookings SET odo_start=?, odo_started_at=?, miles_allowed=?, lifecycle='active',
+    agreement_status='sent', agreement_token=? WHERE id=?`)
+    .run(start, now, milesAllowed, token, b.id);
 
-    res.json({ ok: true, data, milesDriven });
-  };
-}
-router.post('/bookings/:id/checkin', carPhoto.array('photos', 12), handleInspection('checkin'));
-router.post('/bookings/:id/checkout', carPhoto.array('photos', 12), handleInspection('checkout'));
+  // Send the sign link now (agreement reflects the starting odometer).
+  const base = process.env.PUBLIC_URL || 'http://localhost:4000';
+  const signUrl = `${base}/sign/${token}`;
+  const car = db.prepare(`SELECT * FROM cars WHERE id=?`).get(b.assigned_car_id);
+  try {
+    await sendEmail({
+      to: b.email,
+      subject: `Your rental agreement is ready to sign — ${b.reference}`,
+      text: `Your vehicle is ready for pickup!\n\nVehicle: ${car ? `${car.year} ${car.make} ${car.model} (${car.color})` : 'your assigned vehicle'}\nStarting odometer: ${start.toLocaleString()} miles\nMileage included: ${milesAllowed.toLocaleString()} miles (${perDay}/day for ${b.days} day(s))\n\nPlease review and sign your rental agreement here:\n${signUrl}\n\nA signed copy will be emailed to you.`,
+    });
+  } catch (e) { console.error('agreement email failed', e.message); }
+
+  res.json({ ok: true, signUrl, milesAllowed, odoStart: start });
+});
+
+router.post('/bookings/:id/odometer/end', (req, res) => {
+  const b = db.prepare(`SELECT * FROM bookings WHERE id=?`).get(req.params.id);
+  if (!b) return res.status(404).json({ error: 'Not found' });
+  if (b.odo_start == null) return res.status(400).json({ error: 'Record the starting odometer first.' });
+  const end = Number(req.body.odoEnd);
+  if (!Number.isFinite(end) || end < 0) return res.status(400).json({ error: 'Enter a valid ending odometer reading.' });
+  if (end < b.odo_start) return res.status(400).json({ error: `Ending odometer must be at least the starting reading (${b.odo_start}).` });
+
+  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  db.prepare(`UPDATE bookings SET odo_end=?, odo_ended_at=?, lifecycle='completed' WHERE id=?`).run(end, now, b.id);
+
+  const milesDriven = end - b.odo_start;
+  const allowed = b.miles_allowed || 0;
+  const overMiles = Math.max(0, milesDriven - allowed);
+  const overagePerMile = Number(getSetting('overage_per_mile', '0.58'));
+  const overageCharge = +(overMiles * overagePerMile).toFixed(2);
+  res.json({ ok: true, odoStart: b.odo_start, odoEnd: end, milesDriven, milesAllowed: allowed, overMiles, overagePerMile, overageCharge });
+});
 
 // Rich dashboard data: totals, revenue, by class, 14-day trend.
 router.get('/dashboard', (req, res) => {
@@ -345,19 +372,77 @@ router.get('/calendar', (req, res) => {
   res.json({ cars, bookings, carBlocks });
 });
 
+/* ── Settings: mileage policy + multi-day discount tiers ── */
+router.get('/settings', (req, res) => {
+  let tiers = [];
+  try { tiers = JSON.parse(getSetting('discount_tiers', '[]')); } catch { tiers = []; }
+  res.json({
+    milesPerDay: Number(getSetting('miles_per_day', '150')),
+    overagePerMile: Number(getSetting('overage_per_mile', '0.58')),
+    discountTiers: tiers,
+  });
+});
+router.patch('/settings', (req, res) => {
+  const { milesPerDay, overagePerMile, discountTiers } = req.body;
+  if (milesPerDay != null) {
+    const v = Number(milesPerDay);
+    if (!Number.isFinite(v) || v <= 0) return res.status(400).json({ error: 'Miles per day must be a positive number' });
+    setSetting('miles_per_day', v);
+  }
+  if (overagePerMile != null) {
+    const v = Number(overagePerMile);
+    if (!Number.isFinite(v) || v < 0) return res.status(400).json({ error: 'Overage per mile must be a positive number' });
+    setSetting('overage_per_mile', v);
+  }
+  if (discountTiers != null) {
+    if (!Array.isArray(discountTiers)) return res.status(400).json({ error: 'Discount tiers must be a list' });
+    const clean = discountTiers
+      .map((t) => ({ min_days: Number(t.min_days), percent: Number(t.percent) }))
+      .filter((t) => Number.isFinite(t.min_days) && t.min_days > 0 && Number.isFinite(t.percent) && t.percent >= 0 && t.percent <= 100)
+      .sort((a, b) => a.min_days - b.min_days);
+    setSetting('discount_tiers', JSON.stringify(clean));
+  }
+  res.json({ ok: true });
+});
+
+/* ── Block ALL categories for a date range ("business closed", e.g. holidays) ── */
+router.post('/blocks/all', (req, res) => {
+  const { startDate, endDate, reason } = req.body;
+  if (!startDate || !endDate) return res.status(400).json({ error: 'Start and end dates are required' });
+  const cats = db.prepare(`SELECT id FROM categories WHERE active=1`).all();
+  const ins = db.prepare(`INSERT INTO category_blocks (id,category_id,start_date,end_date,reason) VALUES (?,?,?,?,?)`);
+  const label = reason || 'Business closed';
+  const tx = db.transaction(() => { for (const c of cats) ins.run(nanoid(10), c.id, startDate, endDate, label); });
+  tx();
+  res.json({ ok: true, blocked: cats.length });
+});
+
 function shape(b) {
   const car = b.assigned_car_id ? db.prepare(`SELECT * FROM cars WHERE id=?`).get(b.assigned_car_id) : null;
+  // live mileage summary for completed/active rentals
+  let mileage = null;
+  if (b.odo_start != null) {
+    const overagePerMile = Number(getSetting('overage_per_mile', '0.58'));
+    const driven = b.odo_end != null ? b.odo_end - b.odo_start : null;
+    const allowed = b.miles_allowed || 0;
+    const over = driven != null ? Math.max(0, driven - allowed) : null;
+    mileage = {
+      start: b.odo_start, end: b.odo_end, allowed, driven,
+      overMiles: over, overagePerMile,
+      overageCharge: over != null ? +(over * overagePerMile).toFixed(2) : null,
+    };
+  }
   return {
     ...b,
     insurance_files: safe(b.insurance_files),
     license_url: b.license_file ? `/uploads/${b.license_file}` : null,
     insurance_urls: safe(b.insurance_files).map((f) => `/uploads/${f}`),
+    proof_payment_url: b.proof_payment_file ? `/uploads/${b.proof_payment_file}` : null,
     assigned_car: car ? { desc: `${car.year} ${car.make} ${car.model} (${car.color})`, vin: car.vin, plate: car.license_plate } : null,
     agreement_url: b.agreement_file ? `/agreements/${b.agreement_file}` : null,
     sign_path: b.agreement_token ? `/sign/${b.agreement_token}` : null,
     addons_list: safe(b.addons),
-    checkin_data: b.checkin ? safeObj(b.checkin) : null,
-    checkout_data: b.checkout ? safeObj(b.checkout) : null,
+    mileage,
     refunds_list: safe(b.refunds),
   };
 }

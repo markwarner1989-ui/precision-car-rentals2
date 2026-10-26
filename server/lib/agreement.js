@@ -48,12 +48,19 @@ export const TERMS = [
     'Any contingent liability coverage provided applies only if the driver has no other available insurance, is excess or contingent, and only up to the minimum financial responsibility limits required by the state where the loss occurred. Coverage applies only in the United States. Where permitted by law, {company} has elected not to carry uninsured/underinsured motorist coverage. You agree to indemnify, defend and hold {company} harmless from all claims arising from your use of the vehicle.'],
   ['Telematics Notice',
     'The vehicle may be equipped with GPS and/or event data recorder (EDR) technology. You acknowledge and authorize that your use of the vehicle may be remotely monitored, including collection of location, odometer, fuel level, tire pressure, battery state, diagnostic codes and other data. Where permitted by law, {company} may disable the vehicle when necessary, including if you breach this Agreement. You agree to inform all drivers and passengers of the terms of this section.'],
+  ['Mileage Allowance & Overage',
+    'This rental includes a mileage allowance shown on the Rental Record ({miles_per_day} miles per day). The vehicle is delivered to you with the starting odometer reading recorded on this Agreement. Mileage driven in excess of the included allowance is charged at ${overage_per_mile} per mile. The ending odometer reading is recorded when the vehicle is returned, and any overage is calculated from the difference between the ending and starting readings.'],
   ['Deposit',
     'We may use your deposit to pay any amounts owed to us under this Agreement.'],
   ['Cancellation Policy',
     'If you cancel your reservation within 24 hours of booking, a cancellation fee equal to the deposit will be charged and automatically deducted from the deposit provided. For cancellations made after the 24-hour window, standard cancellation terms and fees as outlined in this agreement apply.'],
   ['Governing Law & Arbitration',
-    'Any dispute arising out of or relating to this Agreement shall be determined by arbitration in the city and state where {company} is located, before one arbitrator, administered by a major arbitration service provider. If arbitration is unavailable or waived, any legal action shall be instituted exclusively in the courts of the city and state where {company} is located. This Agreement is governed by the laws of that state. If any part of this Agreement is held void or unenforceable, the remaining parts are not affected.'],
+    'Any dispute arising out of or relating to this Agreement shall be determined by arbitration in the State of North Carolina, before one arbitrator, administered by a major arbitration service provider. If arbitration is unavailable or waived, any legal action shall be instituted exclusively in the courts of North Carolina. This Agreement is governed by the laws of the State of North Carolina. If any part of this Agreement is held void or unenforceable, the remaining parts are not affected.'],
+  // ⚠️ PLACEHOLDER — replace this section with Precision Car Rentals' own North Carolina
+  // legal rental contract text (from Rent Centric), per client request. Until then the
+  // terms above are adapted general terms and should be reviewed by the client's attorney.
+  ['State-Specific Terms (North Carolina)',
+    'The terms of this Agreement are intended to comply with the laws of the State of North Carolina. [This section is a placeholder for {company}’s official North Carolina rental contract language. Final legal terms to be supplied by {company} and reviewed by its attorney before use.]'],
 ];
 
 function drawHeader(doc, booking) {
@@ -162,6 +169,20 @@ export function generateAgreementPDF(booking, car, signature) {
   doc.font('Helvetica').fontSize(10).fillColor(INK).text(`$${booking.due_at_pickup.toFixed(2)}`, 430, payY + 12);
   doc.moveDown(0.8);
 
+  // Odometer + mileage (recorded at pickup) — the core of the binding mileage terms.
+  if (booking.odo_start != null) {
+    const miMiles = booking.miles_allowed || 0;
+    const odoY = doc.y;
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#444').text('Starting odometer', L, odoY);
+    doc.font('Helvetica').fontSize(10).fillColor(INK).text(`${Number(booking.odo_start).toLocaleString()} miles`, L, odoY + 12);
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#444').text('Mileage included', 310, odoY);
+    doc.font('Helvetica').fontSize(10).fillColor(INK).text(`${miMiles.toLocaleString()} miles`, 310, odoY + 12);
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#444').text('Overage rate', 430, odoY);
+    doc.font('Helvetica').fontSize(10).fillColor(INK).text(`$${Number(signature.overagePerMile != null ? signature.overagePerMile : 0.58).toFixed(2)}/mi`, 430, odoY + 12);
+    doc.y = odoY + 30;
+    doc.moveDown(0.4);
+  }
+
   // Add-ons (if any)
   let addonsArr = [];
   try { addonsArr = JSON.parse(booking.addons || '[]'); } catch { addonsArr = []; }
@@ -189,11 +210,17 @@ export function generateAgreementPDF(booking, car, signature) {
   doc.font('Helvetica-Bold').fontSize(14).fillColor(NAVY).text('Rental Agreement Terms & Conditions');
   doc.moveTo(L, doc.y + 2).lineTo(R, doc.y + 2).stroke(AMBER);
   doc.moveDown(0.6);
+  const perDay = booking.miles_allowed && booking.days ? Math.round(booking.miles_allowed / booking.days) : (signature.milesPerDay || 150);
+  const overagePerMile = signature.overagePerMile != null ? signature.overagePerMile : 0.58;
+  const fill = (s) => s
+    .replace(/\{company\}/g, company)
+    .replace(/\{miles_per_day\}/g, perDay)
+    .replace(/\{overage_per_mile\}/g, Number(overagePerMile).toFixed(2));
   TERMS.forEach(([title, body], i) => {
     if (doc.y > doc.page.height - 120) doc.addPage();
     doc.font('Helvetica-Bold').fontSize(10.5).fillColor(NAVY).text(`${i + 1}. ${title}`);
     doc.moveDown(0.15);
-    doc.font('Helvetica').fontSize(9).fillColor('#222').text(body.replace(/\{company\}/g, company), { align: 'justify', lineGap: 1.5 });
+    doc.font('Helvetica').fontSize(9).fillColor('#222').text(fill(body), { align: 'justify', lineGap: 1.5 });
     doc.moveDown(0.5);
   });
 

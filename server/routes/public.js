@@ -187,10 +187,13 @@ router.post('/bookings', upload.any(), async (req, res) => {
 
     const loc = PICKUP_LOCATIONS[b.pickupLocation];
     await notifyBusiness(`New paid booking ${reference} — ${cat.name}, ${b.pickup.slice(0, 10)}→${b.return.slice(0, 10)}, ${b.firstName} ${b.lastName}. Deposit $${q.deposit} paid. Pickup: ${loc}. Card •${pay.last4}. Review in admin.`);
+    const exampleCars = db.prepare(`SELECT make, model FROM cars WHERE category_id=? AND active=1 LIMIT 3`).all(cat.id)
+      .map((c) => `${c.make} ${c.model}`);
+    const exampleLine = exampleCars.length ? ` (similar to ${exampleCars.join(', ')})` : '';
     await sendEmail({
       to: b.email,
       subject: `Reservation received — ${reference}`,
-      text: `Thank you for reserving with Precision Car Rentals!\n\nReference: ${reference}\nClass: ${cat.name}\nPickup: ${b.pickup.replace('T',' ')} (${loc})\nReturn: ${b.return.replace('T',' ')}\n\nDeposit paid now: $${q.deposit}\nDue at pickup: $${q.dueAtPickup}\n\nWe will contact you within one hour during business hours to approve your reservation. You can also call or text us at ${process.env.BUSINESS_PHONE || ''}.\n\nA valid driver's license and a debit/credit card showing your name are required at pickup.`,
+      text: `Thank you for reserving with Precision Car Rentals!\n\nReference: ${reference}\nClass: ${cat.name}${exampleLine}\nPickup: ${b.pickup.replace('T',' ')} (${loc})\nReturn: ${b.return.replace('T',' ')}\n\nDeposit paid now: $${q.deposit.toFixed(2)}\nDue at pickup: $${dueAtPickupWithAddons.toFixed(2)}\nMileage included: ${q.milesAllowed.toLocaleString()} miles (${q.milesPerDay}/day)\n\nWe will contact you within one hour during business hours to confirm your reservation. Your rental agreement will be sent to you on the day you pick up the car, once we record the vehicle's starting mileage.\n\nA valid driver's license and a debit/credit card showing your name are required at pickup. You can also call or text us at ${process.env.BUSINESS_PHONE || ''}.`,
     });
 
     res.json({

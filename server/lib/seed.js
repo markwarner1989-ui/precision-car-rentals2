@@ -46,15 +46,15 @@ const insurance = [
   {
     code: 'full', label: 'Full Coverage', has_own: 1,
     surcharge_daily: 0, surcharge_target: 'pickup',
-    requires_docs: JSON.stringify(['license', 'insurance_card', 'declaration_page']),
-    followup_text: 'Great — since your policy already carries full coverage in your name, you don\u2019t need to purchase anything extra from us. Please upload your license, insurance card, and your policy declaration page.',
+    requires_docs: JSON.stringify(['license', 'insurance_card', 'declaration_page', 'payment_slip']),
+    followup_text: 'Great — since your policy already carries full coverage in your name, you don\u2019t need to purchase anything extra from us. Please upload your license, insurance card, your policy declaration page, and proof of your most recent insurance payment so we can confirm the policy is active.',
     allowed: 1, sort_order: 1,
   },
   {
     code: 'liability', label: 'Liability Only', has_own: 1,
     surcharge_daily: 25, surcharge_target: 'pickup',
-    requires_docs: JSON.stringify(['license', 'insurance_card']),
-    followup_text: 'Since your policy is liability-only, you\u2019ll need to purchase collision coverage from us for $25/day, added to your pickup balance. Please upload your license and insurance card.',
+    requires_docs: JSON.stringify(['license', 'insurance_card', 'payment_slip']),
+    followup_text: 'Since your policy is liability-only, you\u2019ll need to purchase collision coverage from us for $25/day, added to your pickup balance. Please upload your license, insurance card, and proof of your most recent insurance payment so we can confirm the policy is active.',
     allowed: 1, sort_order: 2,
   },
   {
@@ -67,6 +67,23 @@ const insurance = [
 ];
 const insIns = db.prepare(`INSERT INTO insurance_options (id,code,label,has_own,surcharge_daily,surcharge_target,requires_docs,followup_text,allowed,sort_order) VALUES (@id,@code,@label,@has_own,@surcharge_daily,@surcharge_target,@requires_docs,@followup_text,@allowed,@sort_order)`);
 if (needIns) for (const i of insurance) insIns.run({ id: nanoid(10), ...i });
+
+// One-time migration for EXISTING databases: ensure own-insurance options require
+// proof of recent insurance payment (added after client feedback Oct 15).
+if (!needIns) {
+  for (const code of ['full', 'liability']) {
+    const row = db.prepare(`SELECT requires_docs, followup_text FROM insurance_options WHERE code=?`).get(code);
+    if (!row) continue;
+    let docs = [];
+    try { docs = JSON.parse(row.requires_docs || '[]'); } catch { docs = []; }
+    if (!docs.includes('payment_slip')) {
+      docs.push('payment_slip');
+      const seedRow = insurance.find((i) => i.code === code);
+      db.prepare(`UPDATE insurance_options SET requires_docs=?, followup_text=? WHERE code=?`)
+        .run(JSON.stringify(docs), seedRow ? seedRow.followup_text : row.followup_text, code);
+    }
+  }
+}
 
 // ── Add-ons (10 defaults; admin can add/edit/remove) ──
 const addons = [

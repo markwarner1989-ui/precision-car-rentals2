@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 400" width="640" height="400">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e9efee"/><stop offset="1" stop-color="#cdd8d5"/></linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#dfe7e6"/></linearGradient>
+    <radialGradient id="sun" cx="0.8" cy="0.15" r="0.9"><stop offset="0" stop-color="rgba(255,255,255,0.35)"/><stop offset="1" stop-color="rgba(255,255,255,0)"/></radialGradient>
+  </defs>
+  <rect width="640" height="400" fill="url(#bg)"/><rect width="640" height="400" fill="url(#sun)"/>
+  <ellipse cx="320" cy="330" rx="250" ry="26" fill="rgba(0,0,0,0.12)"/><path d="M140 300 Q146 244 206 236 L252 200 Q320 184 392 202 L440 238 Q506 244 512 300 Z" fill="url(#body)" stroke="#cdd8d5" stroke-width="2"/><path d="M262 208 Q320 194 388 210 L420 236 L236 236 Z" fill="#bcd0d4"/><rect x="176" y="268" width="308" height="9" rx="4" fill="#e08a2b"/><circle cx="226" cy="302" r="32" fill="#1b1b1b"/><circle cx="226" cy="302" r="21" fill="#c9ccce"/><circle cx="226" cy="302" r="7" fill="#6b7073"/><circle cx="440" cy="302" r="32" fill="#1b1b1b"/><circle cx="440" cy="302" r="21" fill="#c9ccce"/><circle cx="440" cy="302" r="7" fill="#6b7073"/></svg>

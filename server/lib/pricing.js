@@ -1,4 +1,22 @@
 import db from './db.js';
+import { getSetting } from './db.js';
+
+// Discount tiers: % off the rental subtotal when days >= min_days. Highest match wins.
+export function discountForDays(days) {
+  let tiers = [];
+  try { tiers = JSON.parse(getSetting('discount_tiers', '[]')); } catch { tiers = []; }
+  const match = tiers
+    .filter((t) => days >= Number(t.min_days))
+    .sort((a, b) => Number(b.min_days) - Number(a.min_days))[0];
+  return match ? { minDays: Number(match.min_days), percent: Number(match.percent) } : null;
+}
+
+export function milesPolicy() {
+  return {
+    perDay: Number(getSetting('miles_per_day', '150')),
+    overagePerMile: Number(getSetting('overage_per_mile', '0.58')),
+  };
+}
 
 export const PICKUP_LOCATIONS = {
   charlotte_airport: 'Charlotte Airport',
@@ -50,13 +68,21 @@ export function quote(category, pickupAt, returnAt, coverageCode) {
   const ins = getInsurance(coverageCode);
   if (!ins) throw new Error('Invalid insurance selection');
 
-  const rentalSubtotal = +(category.daily_rate * days).toFixed(2);
+  // Keep cents throughout — never round to a whole dollar.
+  const grossRental = +(category.daily_rate * days).toFixed(2);
+  const disc = discountForDays(days);
+  const discountAmount = disc ? +(grossRental * disc.percent / 100).toFixed(2) : 0;
+  const rentalSubtotal = +(grossRental - discountAmount).toFixed(2);
+
   const surchargeSubtotal = +(ins.surcharge_daily * days).toFixed(2);
   const target = ins.surcharge_target || 'pickup';
 
-  const baseDeposit = +category.deposit.toFixed(2);
+  const baseDeposit = +Number(category.deposit).toFixed(2);
   const deposit = +(baseDeposit + (target === 'deposit' ? surchargeSubtotal : 0)).toFixed(2);
   const dueAtPickup = +(rentalSubtotal + (target === 'pickup' ? surchargeSubtotal : 0)).toFixed(2);
+
+  const policy = milesPolicy();
+  const milesAllowed = policy.perDay * days;
 
   return {
     days,
@@ -71,9 +97,15 @@ export function quote(category, pickupAt, returnAt, coverageCode) {
     requiresDocs: JSON.parse(ins.requires_docs || '[]'),
     followupText: ins.followup_text,
     allowed: !!ins.allowed,
+    grossRental,
+    discountPercent: disc ? disc.percent : 0,
+    discountAmount,
     rentalSubtotal,
     deposit,
     dueAtPickup,
+    milesPerDay: policy.perDay,
+    milesAllowed,
+    overagePerMile: policy.overagePerMile,
   };
 }
 
@@ -81,6 +113,6 @@ export const DOC_LABELS = {
   license: 'Driver\u2019s license',
   insurance_card: 'Insurance card',
   declaration_page: 'Policy declaration page',
-  payment_slip: 'Last insurance payment slip',
+  payment_slip: 'Proof of recent insurance payment',
   payment_card: 'Payment card photo',
 };
